@@ -1,7 +1,7 @@
 import os
 import logging
 from collections import defaultdict
-from telegram import Update, BotCommand
+from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
     MessageHandler,
@@ -19,16 +19,18 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ─── Config ────────────────────────────────────────────────────────────────────
-BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+BOT_TOKEN    = os.environ["TELEGRAM_BOT_TOKEN"]
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
-MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-MAX_HISTORY = int(os.getenv("MAX_HISTORY", "20"))  # messaggi per chat
+WEBHOOK_URL  = os.environ["WEBHOOK_URL"]   # es. https://spicy-suzi-xxx.koyeb.app
+MODEL        = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+MAX_HISTORY  = int(os.getenv("MAX_HISTORY", "20"))
+PORT         = int(os.getenv("PORT", "8000"))
 
-SYSTEM_PROMPT = """Sei un assistente zen dedicato alla meditazione e alla mindfulness.
-Rispondi SOLO a domande riguardanti: meditazione, mindfulness, respirazione, zen, buddhismo, benessere mentale, tecniche di rilassamento e consapevolezza.
-Se ti viene chiesto qualcosa di non correlato, reindirizza gentilmente l'utente verso temi di meditazione.
-Rispondi nella lingua dell'utente. Usa un tono calmo, pacato e incoraggiante.
-Puoi consigliare tecniche pratiche, sessioni guidate e spiegare concetti zen."""
+SYSTEM_PROMPT = """You are a helpful, knowledgeable, and friendly assistant.
+You can answer questions on any topic: science, technology, history, culture, coding, math, travel, philosophy, and more.
+Always respond in the same language the user is writing in — automatically detect and match it.
+Be concise but thorough. When needed, use bullet points or numbered lists for clarity.
+If you don't know something, say so honestly instead of guessing."""
 
 # ─── State ─────────────────────────────────────────────────────────────────────
 groq_client = Groq(api_key=GROQ_API_KEY)
@@ -37,7 +39,6 @@ chat_histories: dict[int, list[dict]] = defaultdict(list)
 
 # ─── Helpers ───────────────────────────────────────────────────────────────────
 def trim_history(chat_id: int) -> None:
-    """Keep only the last MAX_HISTORY messages to avoid token overflow."""
     if len(chat_histories[chat_id]) > MAX_HISTORY:
         chat_histories[chat_id] = chat_histories[chat_id][-MAX_HISTORY:]
 
@@ -80,10 +81,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     chat_id = update.effective_chat.id
     user_text = update.message.text
 
-    # Typing indicator
     await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-
-    # Add user message to history
     chat_histories[chat_id].append({"role": "user", "content": user_text})
     trim_history(chat_id)
 
@@ -95,7 +93,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     except Exception as e:
         logger.error(f"Groq error for chat {chat_id}: {e}")
-        # Remove the failed user message from history
         chat_histories[chat_id].pop()
         await update.message.reply_text(
             "⚠️ Something went wrong. Please try again in a moment."
@@ -110,19 +107,22 @@ async def handle_unsupported(update: Update, context: ContextTypes.DEFAULT_TYPE)
 def main() -> None:
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Register commands
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CommandHandler("model", cmd_model))
-
-    # Text messages
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    # Unsupported (photos, files, etc.)
     app.add_handler(MessageHandler(~filters.TEXT, handle_unsupported))
 
-    logger.info(f"Bot started — model: {MODEL}")
-    app.run_polling(drop_pending_updates=True)
+    webhook_path = f"/webhook/{BOT_TOKEN}"
+    logger.info(f"Bot started in webhook mode — {WEBHOOK_URL}{webhook_path}")
+
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=webhook_path,
+        webhook_url=f"{WEBHOOK_URL}{webhook_path}",
+        drop_pending_updates=True,
+    )
 
 
 if __name__ == "__main__":
