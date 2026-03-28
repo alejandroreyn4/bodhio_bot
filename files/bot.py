@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # ─── Config ────────────────────────────────────────────────────────────────────
 BOT_TOKEN    = os.environ["TELEGRAM_BOT_TOKEN"]
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
-WEBHOOK_URL  = os.environ["WEBHOOK_URL"]
+WEBHOOK_URL  = os.environ["WEBHOOK_URL"].rstrip("/")
 MODEL        = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 MAX_HISTORY  = int(os.getenv("MAX_HISTORY", "20"))
 PORT         = int(os.getenv("PORT", "8000"))
