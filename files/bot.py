@@ -1,6 +1,8 @@
 import os
 import logging
+import asyncio
 from collections import defaultdict
+from aiohttp import web
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -21,7 +23,7 @@ logger = logging.getLogger(__name__)
 # ─── Config ────────────────────────────────────────────────────────────────────
 BOT_TOKEN    = os.environ["TELEGRAM_BOT_TOKEN"]
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
-WEBHOOK_URL  = os.environ["WEBHOOK_URL"]   # es. https://spicy-suzi-xxx.koyeb.app
+WEBHOOK_URL  = os.environ["WEBHOOK_URL"]
 MODEL        = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 MAX_HISTORY  = int(os.getenv("MAX_HISTORY", "20"))
 PORT         = int(os.getenv("PORT", "8000"))
@@ -103,27 +105,61 @@ async def handle_unsupported(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("📎 I can only handle text messages for now.")
 
 
-# ─── Main ──────────────────────────────────────────────────────────────────────
-def main() -> None:
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+# ─── Health check endpoint ─────────────────────────────────────────────────────
+async def health_handler(request):
+    return web.Response(text="OK")
 
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("reset", cmd_reset))
-    app.add_handler(CommandHandler("model", cmd_model))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(MessageHandler(~filters.TEXT, handle_unsupported))
+
+async def telegram_webhook_handler(request, app):
+    data = await request.json()
+    update = Update.de_json(data, app.bot)
+    await app.process_update(update)
+    return web.Response(text="OK")
+
+
+# ─── Main ──────────────────────────────────────────────────────────────────────
+async def main() -> None:
+    # Build telegram app
+    tg_app = ApplicationBuilder().token(BOT_TOKEN).updater(None).build()
+
+    tg_app.add_handler(CommandHandler("start", cmd_start))
+    tg_app.add_handler(CommandHandler("reset", cmd_reset))
+    tg_app.add_handler(CommandHandler("model", cmd_model))
+    tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    tg_app.add_handler(MessageHandler(~filters.TEXT, handle_unsupported))
 
     webhook_path = f"/webhook/{BOT_TOKEN}"
-    logger.info(f"Bot started in webhook mode — {WEBHOOK_URL}{webhook_path}")
 
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=webhook_path,
-        webhook_url=f"{WEBHOOK_URL}{webhook_path}",
+    # Build aiohttp web server
+    web_app = web.Application()
+    web_app.router.add_get("/", health_handler)
+    web_app.router.add_get("/health", health_handler)
+    web_app.router.add_post(
+        webhook_path,
+        lambda req: telegram_webhook_handler(req, tg_app),
+    )
+
+    # Initialize telegram app and set webhook
+    await tg_app.initialize()
+    await tg_app.bot.set_webhook(
+        url=f"{WEBHOOK_URL}{webhook_path}",
         drop_pending_updates=True,
     )
+    await tg_app.start()
+
+    logger.info(f"Bot started — webhook: {WEBHOOK_URL}{webhook_path}")
+
+    # Start web server
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+
+    logger.info(f"Web server listening on port {PORT}")
+
+    # Run forever
+    await asyncio.Event().wait()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
