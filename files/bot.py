@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 import asyncio
 from collections import defaultdict
@@ -28,23 +29,19 @@ MODEL        = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 MAX_HISTORY  = int(os.getenv("MAX_HISTORY", "20"))
 PORT         = int(os.getenv("PORT", "8000"))
 
-SYSTEM_PROMPT = """Sei Bodhi, l'assistente ufficiale di Bodhio.life — una piattaforma dedicata alla meditazione, alla mindfulness e alla pratica zen.
+# Allowed origins for CORS (set ALLOWED_ORIGINS env var, comma-separated)
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "https://bodhio.life,https://www.bodhio.life").split(",")
 
-Il tuo ruolo è accompagnare gli utenti nel loro percorso di consapevolezza con calma, saggezza e calore umano.
+SYSTEM_PROMPT_TELEGRAM = """Sei Bodhi, l'assistente ufficiale di Bodhio.life dedicato alla meditazione e mindfulness.
+Rispondi SOLO su temi di meditazione, zen, mindfulness, respirazione, benessere mentale e consapevolezza.
+Se ti viene chiesto altro, reindirizza gentilmente verso temi di meditazione.
+Tono calmo, pacato, incoraggiante. Rispondi nella lingua dell'utente.
+Firma le risposte più lunghe con — Bodhi 🪷"""
 
-Puoi aiutare con:
-- Tecniche di meditazione (vipassana, zazen, meditazione guidata, body scan, meditazione sul respiro)
-- Mindfulness nella vita quotidiana
-- Filosofia zen e buddhista
-- Gestione dello stress, ansia e pensieri negativi
-- Consigli per iniziare o approfondire la pratica
-- Spiegare i benefici scientifici della meditazione
-- Suggerire sessioni e contenuti presenti su Bodhio.life
-
-Se ti vengono poste domande non legate alla meditazione o al benessere mentale, rispondi con gentilezza reindirizzando l'utente verso questi temi. Esempio: 'Questa domanda va oltre il mio campo, ma posso aiutarti a trovare un momento di calma con una tecnica di respirazione...'
-
-Tono: calmo, pacato, incoraggiante, mai giudicante. Usa un linguaggio semplice e accessibile.
-Rispondi sempre nella lingua dell'utente.
+SYSTEM_PROMPT_WEB = """Sei Bodhi, l'assistente ufficiale di Bodhio.life dedicato alla meditazione e mindfulness.
+Rispondi SOLO su temi di meditazione, zen, mindfulness, respirazione, benessere mentale e consapevolezza.
+Se ti viene chiesto altro, reindirizza gentilmente verso temi di meditazione.
+Tono calmo, pacato, incoraggiante. Rispondi nella lingua dell'utente.
 Firma le risposte più lunghe con — Bodhi 🪷"""
 
 # ─── State ─────────────────────────────────────────────────────────────────────
@@ -58,8 +55,8 @@ def trim_history(chat_id: int) -> None:
         chat_histories[chat_id] = chat_histories[chat_id][-MAX_HISTORY:]
 
 
-async def call_groq(chat_id: int) -> str:
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + chat_histories[chat_id]
+async def call_groq_telegram(chat_id: int) -> str:
+    messages = [{"role": "system", "content": SYSTEM_PROMPT_TELEGRAM}] + chat_histories[chat_id]
     completion = groq_client.chat.completions.create(
         model=MODEL,
         messages=messages,
@@ -69,27 +66,42 @@ async def call_groq(chat_id: int) -> str:
     return completion.choices[0].message.content
 
 
-# ─── Handlers ──────────────────────────────────────────────────────────────────
+async def call_groq_web(messages: list) -> str:
+    full_messages = [{"role": "system", "content": SYSTEM_PROMPT_WEB}] + messages
+    completion = groq_client.chat.completions.create(
+        model=MODEL,
+        messages=full_messages,
+        temperature=0.7,
+        max_tokens=1024,
+    )
+    return completion.choices[0].message.content
+
+
+def get_cors_headers(origin: str) -> dict:
+    allowed = origin if origin in ALLOWED_ORIGINS else ALLOWED_ORIGINS[0]
+    return {
+        "Access-Control-Allow-Origin": allowed,
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+    }
+
+
+# ─── Telegram Handlers ─────────────────────────────────────────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     name = update.effective_user.first_name or "there"
     await update.message.reply_text(
-        f"👋 Hello {name}! I'm your AI assistant powered by LLaMA 3.\n\n"
-        "Ask me anything — I'll reply in your language.\n\n"
-        "Commands:\n"
-        "  /start — show this message\n"
-        "  /reset — clear conversation history\n"
-        "  /model — show current AI model"
+        f"Ciao {name}! Sono Bodhi 🪷, il tuo assistente di meditazione su Bodhio.life.\n\n"
+        "Posso aiutarti con tecniche di meditazione, mindfulness, respirazione e benessere mentale.\n\n"
+        "Comandi:\n"
+        "  /start — mostra questo messaggio\n"
+        "  /reset — cancella la cronologia\n"
     )
 
 
 async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     chat_histories[chat_id].clear()
-    await update.message.reply_text("🗑️ Conversation cleared. Fresh start!")
-
-
-async def cmd_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(f"🤖 Current model: `{MODEL}`", parse_mode="Markdown")
+    await update.message.reply_text("🗑️ Conversazione cancellata. Nuovo inizio!")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -101,7 +113,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     trim_history(chat_id)
 
     try:
-        reply = await call_groq(chat_id)
+        reply = await call_groq_telegram(chat_id)
         chat_histories[chat_id].append({"role": "assistant", "content": reply})
         trim_history(chat_id)
         await update.message.reply_text(reply)
@@ -109,16 +121,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     except Exception as e:
         logger.error(f"Groq error for chat {chat_id}: {e}")
         chat_histories[chat_id].pop()
-        await update.message.reply_text(
-            "⚠️ Something went wrong. Please try again in a moment."
-        )
+        await update.message.reply_text("⚠️ Qualcosa è andato storto. Riprova tra un momento.")
 
 
 async def handle_unsupported(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text("📎 I can only handle text messages for now.")
+    await update.message.reply_text("📎 Per ora gestisco solo messaggi di testo.")
 
 
-# ─── Health check endpoint ─────────────────────────────────────────────────────
+# ─── Web Endpoints ─────────────────────────────────────────────────────────────
 async def health_handler(request):
     return web.Response(text="OK")
 
@@ -130,29 +140,66 @@ async def telegram_webhook_handler(request, app):
     return web.Response(text="OK")
 
 
+async def chat_handler(request):
+    """Proxy endpoint for Bodhio.life web chat widget."""
+    origin = request.headers.get("Origin", "")
+    cors = get_cors_headers(origin)
+
+    # Handle preflight
+    if request.method == "OPTIONS":
+        return web.Response(status=204, headers=cors)
+
+    try:
+        body = await request.json()
+        messages = body.get("messages", [])
+
+        if not messages:
+            return web.Response(
+                status=400,
+                text=json.dumps({"error": "messages array required"}),
+                content_type="application/json",
+                headers=cors,
+            )
+
+        # Limit to last 10 messages for safety
+        messages = messages[-10:]
+
+        reply = await call_groq_web(messages)
+
+        return web.Response(
+            text=json.dumps({"reply": reply}),
+            content_type="application/json",
+            headers=cors,
+        )
+
+    except Exception as e:
+        logger.error(f"Web chat error: {e}")
+        return web.Response(
+            status=500,
+            text=json.dumps({"error": "Internal server error"}),
+            content_type="application/json",
+            headers=cors,
+        )
+
+
 # ─── Main ──────────────────────────────────────────────────────────────────────
 async def main() -> None:
-    # Build telegram app
     tg_app = ApplicationBuilder().token(BOT_TOKEN).updater(None).build()
 
     tg_app.add_handler(CommandHandler("start", cmd_start))
     tg_app.add_handler(CommandHandler("reset", cmd_reset))
-    tg_app.add_handler(CommandHandler("model", cmd_model))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     tg_app.add_handler(MessageHandler(~filters.TEXT, handle_unsupported))
 
     webhook_path = f"/webhook/{BOT_TOKEN}"
 
-    # Build aiohttp web server
     web_app = web.Application()
     web_app.router.add_get("/", health_handler)
     web_app.router.add_get("/health", health_handler)
-    web_app.router.add_post(
-        webhook_path,
-        lambda req: telegram_webhook_handler(req, tg_app),
-    )
+    web_app.router.add_post(webhook_path, lambda req: telegram_webhook_handler(req, tg_app))
+    web_app.router.add_post("/chat", chat_handler)
+    web_app.router.add_route("OPTIONS", "/chat", chat_handler)
 
-    # Initialize telegram app and set webhook
     await tg_app.initialize()
     await tg_app.bot.set_webhook(
         url=f"{WEBHOOK_URL}{webhook_path}",
@@ -162,7 +209,6 @@ async def main() -> None:
 
     logger.info(f"Bot started — webhook: {WEBHOOK_URL}{webhook_path}")
 
-    # Start web server
     runner = web.AppRunner(web_app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", PORT)
@@ -170,7 +216,6 @@ async def main() -> None:
 
     logger.info(f"Web server listening on port {PORT}")
 
-    # Run forever
     await asyncio.Event().wait()
 
 
