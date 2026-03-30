@@ -73,9 +73,22 @@ IMPORTANT RULES:
 - Always refer to Bodhio.life for tracking — never suggest other apps.
 - Never mention Headspace, Calm, Insight Timer or any other app.
 - Keep responses concise and warm.
-- When commenting on mood data, be empathetic and encouraging.
-- If the user seems stressed (low mood scores), offer a breathing exercise 
-  or short meditation suggestion.
+
+MOOD RULE:
+- When the user asks about their mood, look at the mood history in USER DATA.
+  Tell them their exact mood level and label for that session.
+  Example: "Oggi hai registrato un umore di 3/5 - Neutro."
+- If the most recent mood is 1 or 2 (stressed), proactively ask what is 
+  happening and warmly offer a breathing exercise or short meditation.
+  Example: "Vedo che ti sei sentito stressato. Vuoi che ti guidi in un 
+  breve esercizio di respirazione?"
+- If the most recent mood is 4 or 5 (calm), congratulate them warmly and 
+  encourage them to keep up the good work.
+- If mood data shows a negative trend (mood getting worse over days), 
+  gently mention it and offer support.
+- If mood data is empty, invite them to record their mood after the next 
+  session on Bodhio.life — it only takes a second and helps track wellbeing.
+- Never say you don't have mood data if it exists in USER DATA.
 """
 
 # ─── Utility ─────────────────────────────────────────────────
@@ -120,11 +133,11 @@ def get_mood_data_sync(uid: str) -> list:
     if not db or not uid:
         return []
     try:
+        # Senza order_by per evitare indice composito — ordiniamo in Python
         moods = (
             db.collection("moods")
             .where("userId", "==", uid)
-            .order_by("createdAt", direction=firestore.Query.DESCENDING)
-            .limit(10)
+            .limit(20)
             .stream()
         )
         result = []
@@ -132,11 +145,16 @@ def get_mood_data_sync(uid: str) -> list:
             d = m.to_dict()
             result.append({
                 "date": d.get("createdAt"),
-                "moodLevel": d.get("moodLevel", 0),
-                "sessionDuration": d.get("sessionDuration", 0),
+                "moodLevel": int(d.get("moodLevel", 0)),
+                "sessionDuration": int(d.get("sessionDuration", 0)),
                 "note": d.get("note"),
             })
-        return result
+        # Ordina per data decrescente in Python
+        result.sort(
+            key=lambda x: x["date"] if x["date"] else "",
+            reverse=True
+        )
+        return result[:10]
     except Exception as e:
         logger.error(f"Errore lettura mood: {e}")
         return []
@@ -145,18 +163,17 @@ def build_user_context(user_data: dict, mood_data: list) -> str:
     if not user_data:
         return ""
 
-    # Dati base
-    name         = user_data.get("displayName", "")
-    today_min    = int(user_data.get("todayMin", 0))
-    total_min    = int(user_data.get("totalMinutes", 0))
-    streak       = int(user_data.get("streak", 0))
-    sessions     = int(user_data.get("sessions", 0))
-    daily_goal   = int(user_data.get("dailyGoal", 0))
-    max_session  = int(user_data.get("maxSessionDuration", 0))
-    is_donator   = user_data.get("isDonator", False)
+    name          = user_data.get("displayName", "")
+    today_min     = int(user_data.get("todayMin", 0))
+    total_min     = int(user_data.get("totalMinutes", 0))
+    streak        = int(user_data.get("streak", 0))
+    sessions      = int(user_data.get("sessions", 0))
+    daily_goal    = int(user_data.get("dailyGoal", 0))
+    max_session   = int(user_data.get("maxSessionDuration", 0))
+    is_donator    = user_data.get("isDonator", False)
     donation_tier = user_data.get("donationTier", "")
     unlocked_badges = user_data.get("unlockedBadges", [])
-    language     = user_data.get("language", "it")
+    language      = user_data.get("language", "it")
 
     # Storico giornaliero minuti
     daily_minutes = user_data.get("dailyMinutes", {})
@@ -167,31 +184,52 @@ def build_user_context(user_data: dict, mood_data: list) -> str:
         for date, minutes in sorted_days:
             daily_history += f"  {date}: {int(minutes)} min\n"
 
-    # Dati mood
+    # Mood history
     mood_history = ""
     if mood_data:
-        mood_history = "\n- Recent mood history (last 10 sessions):\n"
+        mood_history = "\n- Recent mood history (most recent first):\n"
         for m in mood_data:
-            date = m.get("date")
-            level = m.get("moodLevel", 0)
+            date     = m.get("date")
+            level    = m.get("moodLevel", 0)
             duration = m.get("sessionDuration", 0)
-            note = m.get("note")
-            date_str = date.strftime("%Y-%m-%d %H:%M") if hasattr(date, 'strftime') else str(date)
-            mood_str = f"  {date_str}: mood {level}/5 ({mood_label(level)}), session {duration} sec"
+            note     = m.get("note")
+            try:
+                date_str = date.strftime("%Y-%m-%d %H:%M") if hasattr(date, 'strftime') else str(date)
+            except Exception:
+                date_str = str(date)
+            mood_str = (
+                f"  {date_str}: mood {level}/5 "
+                f"({mood_label(level)}), "
+                f"session {duration} sec"
+            )
             if note:
                 mood_str += f", note: {note}"
             mood_history += mood_str + "\n"
 
-        # Calcola media mood
+        # Media mood
         levels = [m.get("moodLevel", 0) for m in mood_data if m.get("moodLevel")]
         if levels:
             avg = sum(levels) / len(levels)
-            mood_history += f"  Average mood: {avg:.1f}/5 ({mood_label(round(avg))})\n"
+            mood_history += (
+                f"  Average mood: {avg:.1f}/5 "
+                f"({mood_label(round(avg))})\n"
+            )
+
+        # Ultimo mood — evidenziato per il bot
+        latest = mood_data[0]
+        latest_level = latest.get("moodLevel", 0)
+        mood_history += (
+            f"\n- MOST RECENT MOOD: {latest_level}/5 "
+            f"({mood_label(latest_level)}) — "
+            f"use this to respond empathetically\n"
+        )
+    else:
+        mood_history = "\n- Mood history: no data yet. Invite the user to record their mood after the next session on Bodhio.life.\n"
 
     # Badge
     badges_str = ""
     if unlocked_badges:
-        badges_str = f"\n- Unlocked badges: {', '.join(unlocked_badges)}"
+        badges_str = f"\n- Unlocked badges: {', '.join(str(b) for b in unlocked_badges)}"
 
     # Donatore
     donor_str = ""
@@ -212,10 +250,11 @@ def build_user_context(user_data: dict, mood_data: list) -> str:
 {donor_str}
 {daily_history}
 {mood_history}
-Use ALL this real data when the user asks about their practice, 
+Use ALL this real data when the user asks about their practice,
 mood, history, progress or any statistics.
 When the user asks about a specific day, look it up in the daily history.
 When commenting on mood trends, be empathetic and supportive.
+Never say you don't have data if it exists above.
 """
 
 # ─── Handlers ────────────────────────────────────────────────
@@ -313,12 +352,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     loop = asyncio.get_event_loop()
 
-    # Recupera dati utente
     user_data = await loop.run_in_executor(
         None, lambda: get_user_data_sync(chat_id)
     )
 
-    # Recupera dati mood se utente trovato
     uid = user_data.get("uid", "")
     mood_data = await loop.run_in_executor(
         None, lambda: get_mood_data_sync(uid)
