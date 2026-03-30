@@ -28,14 +28,21 @@ WEBHOOK_URL  = os.environ["WEBHOOK_URL"].rstrip("/")
 MODEL        = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 PORT         = int(os.getenv("PORT", "8000"))
 
+DB_NAME = "ai-studio-3b998794-0fe8-40cf-8aad-6c900a81b085"
+
 try:
     firebase_key = os.environ.get("FIREBASE_KEY")
+    if not firebase_key:
+        raise ValueError("FIREBASE_KEY non trovata nelle variabili d'ambiente")
+    
     cred = credentials.Certificate(json.loads(firebase_key))
     firebase_admin.initialize_app(cred)
-    db = firestore.Client(
-        project="progetto-web-zen",
-        database="ai-studio-3b998794-0fe8-40cf-8aad-6c900a81b085"
-    )
+    
+    # Usa firestore.client() standard e poi imposta il database manualmente
+    db = firestore.client()
+    # Override del database string per usare il database corretto
+    db._database_string_internal = f"projects/progetto-web-zen/databases/{DB_NAME}"
+    
     logger.info("✅ Firebase inizializzato")
 except Exception as e:
     logger.error(f"❌ Firebase error: {e}")
@@ -90,7 +97,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 break
 
         if not found:
-            await update.message.reply_text(f"❌ Token non trovato.")
+            await update.message.reply_text("❌ Token non trovato.")
             return
 
         data = found.to_dict()
@@ -128,7 +135,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     chat_histories[chat_id].append({"role": "user", "content": text})
 
-    # Limite cronologia
     if len(chat_histories[chat_id]) > 20:
         chat_histories[chat_id] = chat_histories[chat_id][-20:]
 
