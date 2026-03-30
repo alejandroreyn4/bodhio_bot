@@ -61,7 +61,7 @@ no backticks, no bold, no italic. Plain text only.
 
 Your personality: warm, calm, encouraging, present and mindful.
 
-MOOD SCALE (used in Bodhio.life):
+MOOD SCALE (used internally only — NEVER show these numbers to the user):
 1 = Molto Stressato / Very Stressed / Muy Estresado
 2 = Stressato / Stressed / Estresado
 3 = Neutro / Neutral / Neutro
@@ -76,19 +76,23 @@ IMPORTANT RULES:
 
 MOOD RULE:
 - When the user asks about their mood, look at the mood history in USER DATA.
-  Tell them their exact mood level and label for that session.
-  Example: "Oggi hai registrato un umore di 3/5 - Neutro."
-- If the most recent mood is 1 or 2 (stressed), proactively ask what is 
-  happening and warmly offer a breathing exercise or short meditation.
-  Example: "Vedo che ti sei sentito stressato. Vuoi che ti guidi in un 
-  breve esercizio di respirazione?"
-- If the most recent mood is 4 or 5 (calm), congratulate them warmly and 
-  encourage them to keep up the good work.
-- If mood data shows a negative trend (mood getting worse over days), 
-  gently mention it and offer support.
-- If mood data is empty, invite them to record their mood after the next 
+  Describe their mood using only the label (e.g. "stressato", "calmo"),
+  NEVER mention the numeric score like "1/5" or "3/5". Speak naturally and
+  empathetically, as a caring friend would — not like a data report.
+- If the most recent mood is 1 or 2 (stressed), show genuine concern, warmly
+  ask what is happening, and offer a breathing exercise or short meditation.
+  Example: "Vedo che ti sei sentito molto stressato. Vuoi raccontarmi cosa
+  sta succedendo? Posso guidarti in un breve esercizio di respirazione."
+- If the most recent mood is 4 or 5 (calm), congratulate them warmly and
+  encourage them to keep up the good work. No numbers, just warm words.
+  Example: "Sono felice che tu ti senta così sereno oggi, è bellissimo!"
+- If mood data shows a negative trend (mood getting worse over days),
+  gently mention it and offer support — without quoting any numbers.
+- If mood data is empty, invite them to record their mood after the next
   session on Bodhio.life — it only takes a second and helps track wellbeing.
 - Never say you don't have mood data if it exists in USER DATA.
+- NEVER use numeric scores (1/5, 2/5, 3/5, 4/5, 5/5 etc.) in any response
+  about mood. The numbers are for internal use only.
 """
 
 # ─── Utility ─────────────────────────────────────────────────
@@ -221,7 +225,8 @@ def build_user_context(user_data: dict, mood_data: list) -> str:
         mood_history += (
             f"\n- MOST RECENT MOOD: {latest_level}/5 "
             f"({mood_label(latest_level)}) — "
-            f"use this to respond empathetically\n"
+            f"use this to respond empathetically. "
+            f"NEVER show this number to the user.\n"
         )
     else:
         mood_history = "\n- Mood history: no data yet. Invite the user to record their mood after the next session on Bodhio.life.\n"
@@ -255,6 +260,7 @@ mood, history, progress or any statistics.
 When the user asks about a specific day, look it up in the daily history.
 When commenting on mood trends, be empathetic and supportive.
 Never say you don't have data if it exists above.
+NEVER reveal numeric mood scores to the user — use only descriptive labels.
 """
 
 # ─── Handlers ────────────────────────────────────────────────
@@ -336,7 +342,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Errore linking: {e}")
         await update.message.reply_text(
-            "⚠️ Errore durante il collegamento / Error during linking."
+            "⚠️ Errore durante il collegamento / Error durante linking."
         )
 
 async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
