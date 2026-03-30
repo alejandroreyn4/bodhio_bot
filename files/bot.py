@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import logging
 import asyncio
@@ -55,6 +56,9 @@ If they write in Italian → reply in Italian.
 If they write in English → reply in English.
 If they write in Spanish → reply in Spanish.
 
+FORMATTING RULE: Never use Markdown formatting. No asterisks, no underscores, 
+no backticks, no bold, no italic. Plain text only.
+
 Your personality: warm, calm, encouraging, present and mindful.
 
 Your role: help users with meditation, mindfulness, breathing techniques 
@@ -71,6 +75,17 @@ IMPORTANT RULES:
 - Never mention other meditation apps (Headspace, Calm, Insight Timer, etc.)
 - Keep responses concise and warm — avoid long lists or bullet points.
 """
+
+# ─── Utility ─────────────────────────────────────────────────
+def strip_markdown(text: str) -> str:
+    """Rimuove la formattazione Markdown dal testo"""
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
+    text = re.sub(r'__(.*?)__', r'\1', text)
+    text = re.sub(r'\*(.*?)\*', r'\1', text)
+    text = re.sub(r'_(.*?)_', r'\1', text)
+    text = re.sub(r'`(.*?)`', r'\1', text)
+    text = re.sub(r'#{1,6}\s', '', text)
+    return text.strip()
 
 # ─── Firebase user data ───────────────────────────────────────
 def get_user_data_sync(chat_id: int) -> dict:
@@ -93,11 +108,11 @@ def get_user_data_sync(chat_id: int) -> dict:
 def build_user_context(user_data: dict) -> str:
     if not user_data:
         return ""
-    today_min  = int(user_data.get("todayMin", 0))
-    total_min  = int(user_data.get("totalMinutes", 0))
-    streak     = int(user_data.get("streak", 0))
-    sessions   = int(user_data.get("sessions", 0))
-    name       = user_data.get("displayName", "")
+    today_min = int(user_data.get("todayMin", 0))
+    total_min = int(user_data.get("totalMinutes", 0))
+    streak    = int(user_data.get("streak", 0))
+    sessions  = int(user_data.get("sessions", 0))
+    name      = user_data.get("displayName", "")
     return f"""
 [USER DATA from Bodhio.life]
 - Name: {name}
@@ -137,7 +152,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Token ricevuto: '{token}'")
 
     if not db:
-        await update.message.reply_text("⚠️ Database non disponibile / Database unavailable.")
+        await update.message.reply_text(
+            "⚠️ Database non disponibile / Database unavailable."
+        )
         return
 
     try:
@@ -151,7 +168,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 break
 
         if not found:
-            await update.message.reply_text("❌ Token non trovato / Token not found.")
+            await update.message.reply_text(
+                "❌ Token non trovato / Token not found."
+            )
             return
 
         data = found.to_dict()
@@ -199,7 +218,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     text    = update.message.text
 
-    # Recupera dati utente da Firebase in modo asincrono
     loop      = asyncio.get_event_loop()
     user_data = await loop.run_in_executor(
         None, lambda: get_user_data_sync(chat_id)
@@ -210,7 +228,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     chat_histories[chat_id].append({"role": "user", "content": text})
 
-    # Limite cronologia
     if len(chat_histories[chat_id]) > 20:
         chat_histories[chat_id] = chat_histories[chat_id][-20:]
 
@@ -219,6 +236,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         messages=[{"role": "system", "content": full_system}] + chat_histories[chat_id],
     )
     reply = completion.choices[0].message.content
+    reply = strip_markdown(reply)
 
     chat_histories[chat_id].append({"role": "assistant", "content": reply})
     await update.message.reply_text(reply)
