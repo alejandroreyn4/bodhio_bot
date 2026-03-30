@@ -27,55 +27,109 @@ GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 WEBHOOK_URL  = os.environ["WEBHOOK_URL"].rstrip("/")
 MODEL        = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 PORT         = int(os.getenv("PORT", "8000"))
+DB_NAME      = "ai-studio-3b998794-0fe8-40cf-8aad-6c900a81b085"
 
-DB_NAME = "ai-studio-3b998794-0fe8-40cf-8aad-6c900a81b085"
-
+# ─── Firebase ────────────────────────────────────────────────
 try:
     firebase_key = os.environ.get("FIREBASE_KEY")
     if not firebase_key:
-        raise ValueError("FIREBASE_KEY non trovata nelle variabili d'ambiente")
-    
+        raise ValueError("FIREBASE_KEY non trovata")
     cred = credentials.Certificate(json.loads(firebase_key))
     firebase_admin.initialize_app(cred)
-    
-    # Usa firestore.client() standard e poi imposta il database manualmente
     db = firestore.client()
-    # Override del database string per usare il database corretto
     db._database_string_internal = f"projects/progetto-web-zen/databases/{DB_NAME}"
-    
     logger.info("✅ Firebase inizializzato")
 except Exception as e:
     logger.error(f"❌ Firebase error: {e}")
     db = None
 
+# ─── AI ──────────────────────────────────────────────────────
 groq_client = Groq(api_key=GROQ_API_KEY)
 chat_histories = defaultdict(list)
 
-SYSTEM_PROMPT = """Sei Bodhi 🪷, un assistente di meditazione gentile, 
-presente e premuroso su Bodhio.life. Rispondi sempre in italiano con 
-tono caldo, calmo e incoraggiante. Aiuta l'utente con meditazione, 
-mindfulness, respirazione e benessere mentale."""
+SYSTEM_PROMPT = """You are Bodhi 🪷, the official assistant of Bodhio.life — 
+a free meditation app with no subscriptions and no ads.
 
-async def call_ai(messages):
-    completion = groq_client.chat.completions.create(
-        model=MODEL,
-        messages=[{"role": "system", "content": SYSTEM_PROMPT}] + messages,
-    )
-    return completion.choices[0].message.content
+LANGUAGE RULE: Always reply in the same language the user writes to you.
+If they write in Italian → reply in Italian.
+If they write in English → reply in English.
+If they write in Spanish → reply in Spanish.
 
+Your personality: warm, calm, encouraging, present and mindful.
+
+Your role: help users with meditation, mindfulness, breathing techniques 
+and mental wellbeing.
+
+IMPORTANT RULES:
+- When the user asks about tracking meditation, setting goals, or viewing 
+  statistics, ALWAYS refer them to Bodhio.life — never suggest other apps 
+  or alternative methods.
+- When the user asks about their meditation data (minutes today, streak, 
+  total sessions), use the [USER DATA] section below if available.
+- If no user data is available, kindly invite them to link their Bodhio 
+  account or visit Bodhio.life.
+- Never mention other meditation apps (Headspace, Calm, Insight Timer, etc.)
+- Keep responses concise and warm — avoid long lists or bullet points.
+"""
+
+# ─── Firebase user data ───────────────────────────────────────
+def get_user_data_sync(chat_id: int) -> dict:
+    if not db:
+        return {}
+    try:
+        users = (
+            db.collection("users")
+            .where("telegramChatId", "==", chat_id)
+            .limit(1)
+            .stream()
+        )
+        for user in users:
+            return user.to_dict()
+        return {}
+    except Exception as e:
+        logger.error(f"Errore lettura utente: {e}")
+        return {}
+
+def build_user_context(user_data: dict) -> str:
+    if not user_data:
+        return ""
+    today_min  = int(user_data.get("todayMin", 0))
+    total_min  = int(user_data.get("totalMinutes", 0))
+    streak     = int(user_data.get("streak", 0))
+    sessions   = int(user_data.get("sessions", 0))
+    name       = user_data.get("displayName", "")
+    return f"""
+[USER DATA from Bodhio.life]
+- Name: {name}
+- Minutes meditated today: {today_min}
+- Total minutes meditated: {total_min}
+- Current streak (consecutive days): {streak}
+- Total sessions completed: {sessions}
+Use this real data when the user asks about their practice.
+"""
+
+# ─── Handlers ────────────────────────────────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    name = update.effective_user.first_name or "amico"
-    args = context.args
+    name    = update.effective_user.first_name or "friend"
+    args    = context.args
 
     logger.info(f"/start ricevuto da {name}, args: {args}")
 
     if not args:
         await update.message.reply_text(
-            f"Ciao {name}! Sono Bodhi 🪷, il tuo assistente di meditazione su Bodhio.life.\n\n"
-            "Puoi chiedermi qualsiasi cosa sulla meditazione, mindfulness o benessere mentale. "
-            "Sono qui per te 🙏\n\n"
-            "Comandi:\n/start — mostra questo messaggio\n/reset — cancella la cronologia"
+            f"Ciao {name}! Sono Bodhi 🪷\n"
+            "Hi! I'm Bodhi 🪷\n"
+            "¡Hola! Soy Bodhi 🪷\n\n"
+            "🇮🇹 Sono il tuo assistente di meditazione su Bodhio.life. "
+            "Scrivimi nella lingua che preferisci!\n\n"
+            "🇬🇧 I'm your meditation assistant on Bodhio.life. "
+            "Write to me in whichever language you prefer!\n\n"
+            "🇪🇸 Soy tu asistente de meditación en Bodhio.life. "
+            "¡Escríbeme en el idioma que prefieras!\n\n"
+            "Comandi / Commands / Comandos:\n"
+            "/start — show this message\n"
+            "/reset — clear chat history"
         )
         return
 
@@ -83,11 +137,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Token ricevuto: '{token}'")
 
     if not db:
-        await update.message.reply_text("⚠️ Database non disponibile.")
+        await update.message.reply_text("⚠️ Database non disponibile / Database unavailable.")
         return
 
     try:
-        docs = db.collection("telegram_link_tokens").stream()
+        docs  = db.collection("telegram_link_tokens").stream()
         found = None
 
         for d in docs:
@@ -97,14 +151,16 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 break
 
         if not found:
-            await update.message.reply_text("❌ Token non trovato.")
+            await update.message.reply_text("❌ Token non trovato / Token not found.")
             return
 
         data = found.to_dict()
-        uid = data.get("uid")
+        uid  = data.get("uid")
 
         if data.get("used"):
-            await update.message.reply_text("⚠️ Token già utilizzato.")
+            await update.message.reply_text(
+                "⚠️ Token già utilizzato / Token already used."
+            )
             return
 
         db.collection("users").document(uid).set(
@@ -115,51 +171,79 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         await update.message.reply_text(
-            "✅ Account collegato con successo!\n\n"
-            "Da ora ti invierò promemoria personalizzati, "
-            "notifiche sui badge e aggiornamenti settimanali 🙏"
+            "✅ Account collegato con successo!\n"
+            "✅ Account successfully linked!\n"
+            "✅ ¡Cuenta vinculada con éxito!\n\n"
+            "🪷 Da ora ti invierò promemoria personalizzati, "
+            "notifiche sui badge e aggiornamenti settimanali.\n"
+            "I'll now send you personalized reminders, "
+            "badge notifications and weekly updates.\n"
+            "Ahora te enviaré recordatorios personalizados, "
+            "notificaciones de insignias y actualizaciones semanales."
         )
 
     except Exception as e:
         logger.error(f"Errore linking: {e}")
-        await update.message.reply_text("⚠️ Errore durante il collegamento.")
+        await update.message.reply_text(
+            "⚠️ Errore durante il collegamento / Error during linking."
+        )
 
 async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     chat_histories[chat_id] = []
-    await update.message.reply_text("🔄 Cronologia cancellata. Ricominciamo da capo 🙏")
+    await update.message.reply_text(
+        "🔄 Cronologia cancellata / History cleared / Historial borrado 🙏"
+    )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    text = update.message.text
+    text    = update.message.text
+
+    # Recupera dati utente da Firebase in modo asincrono
+    loop      = asyncio.get_event_loop()
+    user_data = await loop.run_in_executor(
+        None, lambda: get_user_data_sync(chat_id)
+    )
+
+    user_context = build_user_context(user_data)
+    full_system  = SYSTEM_PROMPT + user_context
 
     chat_histories[chat_id].append({"role": "user", "content": text})
 
+    # Limite cronologia
     if len(chat_histories[chat_id]) > 20:
         chat_histories[chat_id] = chat_histories[chat_id][-20:]
 
-    reply = await call_ai(chat_histories[chat_id])
-    chat_histories[chat_id].append({"role": "assistant", "content": reply})
+    completion = groq_client.chat.completions.create(
+        model=MODEL,
+        messages=[{"role": "system", "content": full_system}] + chat_histories[chat_id],
+    )
+    reply = completion.choices[0].message.content
 
+    chat_histories[chat_id].append({"role": "assistant", "content": reply})
     await update.message.reply_text(reply)
 
+# ─── Web ─────────────────────────────────────────────────────
 async def health(request):
     return web.Response(text="OK")
 
 async def webhook(request, app):
-    data = await request.json()
+    data   = await request.json()
     update = Update.de_json(data, app.bot)
     await app.process_update(update)
     return web.Response(text="OK")
 
+# ─── Main ────────────────────────────────────────────────────
 async def main():
     tg_app = ApplicationBuilder().token(BOT_TOKEN).build()
     tg_app.add_handler(CommandHandler("start", cmd_start))
     tg_app.add_handler(CommandHandler("reset", cmd_reset))
-    tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    tg_app.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
+    )
 
     webhook_path = f"/webhook/{BOT_TOKEN}"
-    web_app = web.Application()
+    web_app      = web.Application()
     web_app.router.add_get("/", health)
     web_app.router.add_get("/health", health)
     web_app.router.add_post(webhook_path, lambda r: webhook(r, tg_app))
