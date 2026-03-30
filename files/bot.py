@@ -3,6 +3,7 @@ import json
 import logging
 import asyncio
 from collections import defaultdict
+
 from aiohttp import web
 from telegram import Update
 from telegram.ext import (
@@ -12,20 +13,21 @@ from telegram.ext import (
     filters,
     ContextTypes,
 )
+
 from groq import Groq
 
-# 🔥 Firebase Admin
+# 🔥 Firebase
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-# ─── Logging ───────────────────────────────────────────────────────────────────
+# ─── Logging ─────────────────────────────────────────────────
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 
-# ─── Config ────────────────────────────────────────────────────────────────────
+# ─── Config ──────────────────────────────────────────────────
 BOT_TOKEN    = os.environ["TELEGRAM_BOT_TOKEN"]
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 WEBHOOK_URL  = os.environ["WEBHOOK_URL"].rstrip("/")
@@ -33,36 +35,37 @@ MODEL        = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 MAX_HISTORY  = int(os.getenv("MAX_HISTORY", "20"))
 PORT         = int(os.getenv("PORT", "8000"))
 
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "https://bodhio.life,https://www.bodhio.life").split(",")
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS",
+    "https://bodhio.life,https://www.bodhio.life"
+).split(",")
 
-# 🔑 Firebase init (una sola volta)
-if not firebase_admin._apps:
-    cred = credentials.Certificate(json.loads(os.environ["FIREBASE_KEY"]))
-    firebase_admin.initialize_app(cred)
-
+# 🔥 Firebase init
+cred = credentials.Certificate(json.loads(os.environ["FIREBASE_KEY"]))
+firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# ─── Prompt ────────────────────────────────────────────────────────────────────
-SYSTEM_PROMPT_TELEGRAM = """Sei Bodhi, l'assistente ufficiale di Bodhio.life dedicato alla meditazione e mindfulness.
-Rispondi SOLO su temi di meditazione, zen, mindfulness, respirazione, benessere mentale e consapevolezza.
-Se ti viene chiesto altro, reindirizza gentilmente verso temi di meditazione.
-Tono calmo, pacato, incoraggiante. Rispondi nella lingua dell'utente.
-Firma le risposte più lunghe con — Bodhi 🪷"""
+# ─── Prompt ──────────────────────────────────────────────────
+SYSTEM_PROMPT_TELEGRAM = """Sei Bodhi, assistente di meditazione.
+Rispondi solo su mindfulness, meditazione, respiro.
+Tono calmo e gentile.
+Firma con — Bodhi 🪷"""
 
 SYSTEM_PROMPT_WEB = SYSTEM_PROMPT_TELEGRAM
 
-# ─── State ─────────────────────────────────────────────────────────────────────
+# ─── State ───────────────────────────────────────────────────
 groq_client = Groq(api_key=GROQ_API_KEY)
 chat_histories: dict[int, list[dict]] = defaultdict(list)
 
-# ─── Helpers ───────────────────────────────────────────────────────────────────
-def trim_history(chat_id: int) -> None:
+# ─── Helpers ─────────────────────────────────────────────────
+def trim_history(chat_id: int):
     if len(chat_histories[chat_id]) > MAX_HISTORY:
         chat_histories[chat_id] = chat_histories[chat_id][-MAX_HISTORY:]
 
 
-async def call_groq_telegram(chat_id: int) -> str:
+async def call_groq_telegram(chat_id: int):
     messages = [{"role": "system", "content": SYSTEM_PROMPT_TELEGRAM}] + chat_histories[chat_id]
+
     completion = groq_client.chat.completions.create(
         model=MODEL,
         messages=messages,
@@ -72,8 +75,9 @@ async def call_groq_telegram(chat_id: int) -> str:
     return completion.choices[0].message.content
 
 
-async def call_groq_web(messages: list) -> str:
+async def call_groq_web(messages: list):
     full_messages = [{"role": "system", "content": SYSTEM_PROMPT_WEB}] + messages
+
     completion = groq_client.chat.completions.create(
         model=MODEL,
         messages=full_messages,
@@ -83,7 +87,7 @@ async def call_groq_web(messages: list) -> str:
     return completion.choices[0].message.content
 
 
-def get_cors_headers(origin: str) -> dict:
+def get_cors_headers(origin: str):
     allowed = origin if origin in ALLOWED_ORIGINS else ALLOWED_ORIGINS[0]
     return {
         "Access-Control-Allow-Origin": allowed,
@@ -91,62 +95,71 @@ def get_cors_headers(origin: str) -> dict:
         "Access-Control-Allow-Headers": "Content-Type",
     }
 
-# ─── 🔥 TELEGRAM HANDLERS ──────────────────────────────────────────────────────
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    name = update.effective_user.first_name or "there"
+# ─────────────────────────────────────────────────────────────
+# 🔗 TELEGRAM LINKING (QUI STA LA MAGIA)
+# ─────────────────────────────────────────────────────────────
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
+    user = update.effective_user
+    name = user.first_name or "there"
 
-    token = context.args[0] if context.args else None
-    print("TOKEN:", token)
+    # 👉 Se arriva token dal link
+    if context.args:
+        token = context.args[0]
 
-    if token:
         try:
-            token_ref = db.collection("telegram_link_tokens").document(token)
-            token_doc = token_ref.get()
+            doc_ref = db.collection("telegram_link_tokens").document(token)
+            doc = doc_ref.get()
 
-            if not token_doc.exists or token_doc.to_dict().get("used"):
-                await update.message.reply_text("❌ Link non valido o già usato.")
+            if not doc.exists:
+                await update.message.reply_text("❌ Token non valido.")
                 return
 
-            uid = token_doc.to_dict()["uid"]
+            data = doc.to_dict()
 
-            # 🔗 collega utente
-            db.collection("users").document(uid).update({
-                "telegramChatId": chat_id
-            })
+            if data.get("used"):
+                await update.message.reply_text("⚠️ Token già utilizzato.")
+                return
+
+            # ✅ salva collegamento
+            db.collection("users").document(data["uid"]).set({
+                "telegram_id": chat_id,
+                "telegram_username": user.username,
+            }, merge=True)
 
             # ✅ segna token usato
-            token_ref.update({"used": True})
+            doc_ref.update({"used": True})
 
-            await update.message.reply_text("✅ Account collegato con successo! 🙏")
+            await update.message.reply_text(
+                "✅ Collegamento completato!\n\n"
+                "Ora puoi usare Bodhi anche su Telegram 🪷"
+            )
             return
 
         except Exception as e:
-            print("ERROR LINK:", e)
+            logger.error(f"Link error: {e}")
             await update.message.reply_text("⚠️ Errore durante il collegamento.")
             return
 
-    # fallback normale
+    # 👉 fallback normale
     await update.message.reply_text(
-        f"Ciao {name}! Sono Bodhi 🪷, il tuo assistente di meditazione su Bodhio.life.\n\n"
-        "Posso aiutarti con tecniche di meditazione, mindfulness e benessere mentale.\n\n"
-        "Comandi:\n"
-        "  /start — mostra questo messaggio\n"
-        "  /reset — cancella la cronologia\n"
+        f"Ciao {name}! Sono Bodhi 🪷\n\n"
+        "Parliamo di meditazione?"
     )
 
 
-async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     chat_histories[chat_id].clear()
-    await update.message.reply_text("🗑️ Conversazione cancellata. Nuovo inizio!")
+    await update.message.reply_text("🗑️ Reset completato")
 
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_text = update.message.text
 
     await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+
     chat_histories[chat_id].append({"role": "user", "content": user_text})
     trim_history(chat_id)
 
@@ -154,18 +167,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         reply = await call_groq_telegram(chat_id)
         chat_histories[chat_id].append({"role": "assistant", "content": reply})
         trim_history(chat_id)
+
         await update.message.reply_text(reply)
 
     except Exception as e:
-        logger.error(f"Groq error for chat {chat_id}: {e}")
-        chat_histories[chat_id].pop()
-        await update.message.reply_text("⚠️ Qualcosa è andato storto. Riprova tra un momento.")
+        logger.error(e)
+        await update.message.reply_text("⚠️ Errore, riprova")
 
 
-async def handle_unsupported(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text("📎 Per ora gestisco solo messaggi di testo.")
+async def handle_unsupported(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("📎 Solo testo per ora.")
 
-# ─── Web Endpoints ─────────────────────────────────────────────────────────────
+# ─── Web ─────────────────────────────────────────────────────
 async def health_handler(request):
     return web.Response(text="OK")
 
@@ -186,17 +199,8 @@ async def chat_handler(request):
 
     try:
         body = await request.json()
-        messages = body.get("messages", [])
+        messages = body.get("messages", [])[-10:]
 
-        if not messages:
-            return web.Response(
-                status=400,
-                text=json.dumps({"error": "messages array required"}),
-                content_type="application/json",
-                headers=cors,
-            )
-
-        messages = messages[-10:]
         reply = await call_groq_web(messages)
 
         return web.Response(
@@ -206,17 +210,12 @@ async def chat_handler(request):
         )
 
     except Exception as e:
-        logger.error(f"Web chat error: {e}")
-        return web.Response(
-            status=500,
-            text=json.dumps({"error": "Internal server error"}),
-            content_type="application/json",
-            headers=cors,
-        )
+        logger.error(e)
+        return web.Response(status=500, headers=cors)
 
-# ─── Main ──────────────────────────────────────────────────────────────────────
-async def main() -> None:
-    tg_app = ApplicationBuilder().token(BOT_TOKEN).updater(None).build()
+# ─── Main ────────────────────────────────────────────────────
+async def main():
+    tg_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     tg_app.add_handler(CommandHandler("start", cmd_start))
     tg_app.add_handler(CommandHandler("reset", cmd_reset))
@@ -228,7 +227,7 @@ async def main() -> None:
     web_app = web.Application()
     web_app.router.add_get("/", health_handler)
     web_app.router.add_get("/health", health_handler)
-    web_app.router.add_post(webhook_path, lambda req: telegram_webhook_handler(req, tg_app))
+    web_app.router.add_post(webhook_path, lambda r: telegram_webhook_handler(r, tg_app))
     web_app.router.add_post("/chat", chat_handler)
     web_app.router.add_route("OPTIONS", "/chat", chat_handler)
 
@@ -239,14 +238,12 @@ async def main() -> None:
     )
     await tg_app.start()
 
-    logger.info(f"Bot started — webhook: {WEBHOOK_URL}{webhook_path}")
-
     runner = web.AppRunner(web_app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", PORT)
     await site.start()
 
-    logger.info(f"Web server listening on port {PORT}")
+    logger.info("Bot live 🚀")
 
     await asyncio.Event().wait()
 
