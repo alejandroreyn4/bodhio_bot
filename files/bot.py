@@ -38,7 +38,7 @@ try:
 
     cred = credentials.Certificate(json.loads(firebase_key))
     firebase_admin.initialize_app(cred)
-    db = firestore.client()
+    db = firestore.client(database="ai-studio-3b998794-0fe8-40cf-8aad-6c900a81b085")
 
     logger.info("✅ Firebase inizializzato")
 
