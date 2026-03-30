@@ -56,29 +56,30 @@ If they write in Italian → reply in Italian.
 If they write in English → reply in English.
 If they write in Spanish → reply in Spanish.
 
-FORMATTING RULE: Never use Markdown formatting. No asterisks, no underscores, 
+FORMATTING RULE: Never use Markdown formatting. No asterisks, no underscores,
 no backticks, no bold, no italic. Plain text only.
 
 Your personality: warm, calm, encouraging, present and mindful.
 
-Your role: help users with meditation, mindfulness, breathing techniques 
-and mental wellbeing.
+MOOD SCALE (used in Bodhio.life):
+1 = Molto Stressato / Very Stressed / Muy Estresado
+2 = Stressato / Stressed / Estresado
+3 = Neutro / Neutral / Neutro
+4 = Calmo / Calm / Tranquilo
+5 = Molto Calmo / Very Calm / Muy Tranquilo
 
 IMPORTANT RULES:
-- When the user asks about tracking meditation, setting goals, or viewing 
-  statistics, ALWAYS refer them to Bodhio.life — never suggest other apps 
-  or alternative methods.
-- When the user asks about their meditation data (minutes today, streak, 
-  total sessions), use the [USER DATA] section below if available.
-- If no user data is available, kindly invite them to link their Bodhio 
-  account or visit Bodhio.life.
-- Never mention other meditation apps (Headspace, Calm, Insight Timer, etc.)
-- Keep responses concise and warm — avoid long lists or bullet points.
+- When the user asks about their data, use the [USER DATA] section below.
+- Always refer to Bodhio.life for tracking — never suggest other apps.
+- Never mention Headspace, Calm, Insight Timer or any other app.
+- Keep responses concise and warm.
+- When commenting on mood data, be empathetic and encouraging.
+- If the user seems stressed (low mood scores), offer a breathing exercise 
+  or short meditation suggestion.
 """
 
 # ─── Utility ─────────────────────────────────────────────────
 def strip_markdown(text: str) -> str:
-    """Rimuove la formattazione Markdown dal testo"""
     text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
     text = re.sub(r'__(.*?)__', r'\1', text)
     text = re.sub(r'\*(.*?)\*', r'\1', text)
@@ -87,7 +88,17 @@ def strip_markdown(text: str) -> str:
     text = re.sub(r'#{1,6}\s', '', text)
     return text.strip()
 
-# ─── Firebase user data ───────────────────────────────────────
+def mood_label(level: int) -> str:
+    labels = {
+        1: "Molto Stressato",
+        2: "Stressato",
+        3: "Neutro",
+        4: "Calmo",
+        5: "Molto Calmo"
+    }
+    return labels.get(level, "Sconosciuto")
+
+# ─── Firebase data ────────────────────────────────────────────
 def get_user_data_sync(chat_id: int) -> dict:
     if not db:
         return {}
@@ -99,28 +110,112 @@ def get_user_data_sync(chat_id: int) -> dict:
             .stream()
         )
         for user in users:
-            return user.to_dict()
+            return {"uid": user.id, **user.to_dict()}
         return {}
     except Exception as e:
         logger.error(f"Errore lettura utente: {e}")
         return {}
 
-def build_user_context(user_data: dict) -> str:
+def get_mood_data_sync(uid: str) -> list:
+    if not db or not uid:
+        return []
+    try:
+        moods = (
+            db.collection("moods")
+            .where("userId", "==", uid)
+            .order_by("createdAt", direction=firestore.Query.DESCENDING)
+            .limit(10)
+            .stream()
+        )
+        result = []
+        for m in moods:
+            d = m.to_dict()
+            result.append({
+                "date": d.get("createdAt"),
+                "moodLevel": d.get("moodLevel", 0),
+                "sessionDuration": d.get("sessionDuration", 0),
+                "note": d.get("note"),
+            })
+        return result
+    except Exception as e:
+        logger.error(f"Errore lettura mood: {e}")
+        return []
+
+def build_user_context(user_data: dict, mood_data: list) -> str:
     if not user_data:
         return ""
-    today_min = int(user_data.get("todayMin", 0))
-    total_min = int(user_data.get("totalMinutes", 0))
-    streak    = int(user_data.get("streak", 0))
-    sessions  = int(user_data.get("sessions", 0))
-    name      = user_data.get("displayName", "")
+
+    # Dati base
+    name         = user_data.get("displayName", "")
+    today_min    = int(user_data.get("todayMin", 0))
+    total_min    = int(user_data.get("totalMinutes", 0))
+    streak       = int(user_data.get("streak", 0))
+    sessions     = int(user_data.get("sessions", 0))
+    daily_goal   = int(user_data.get("dailyGoal", 0))
+    max_session  = int(user_data.get("maxSessionDuration", 0))
+    is_donator   = user_data.get("isDonator", False)
+    donation_tier = user_data.get("donationTier", "")
+    unlocked_badges = user_data.get("unlockedBadges", [])
+    language     = user_data.get("language", "it")
+
+    # Storico giornaliero minuti
+    daily_minutes = user_data.get("dailyMinutes", {})
+    daily_history = ""
+    if daily_minutes:
+        sorted_days = sorted(daily_minutes.items())
+        daily_history = "\n- Meditation history by day:\n"
+        for date, minutes in sorted_days:
+            daily_history += f"  {date}: {int(minutes)} min\n"
+
+    # Dati mood
+    mood_history = ""
+    if mood_data:
+        mood_history = "\n- Recent mood history (last 10 sessions):\n"
+        for m in mood_data:
+            date = m.get("date")
+            level = m.get("moodLevel", 0)
+            duration = m.get("sessionDuration", 0)
+            note = m.get("note")
+            date_str = date.strftime("%Y-%m-%d %H:%M") if hasattr(date, 'strftime') else str(date)
+            mood_str = f"  {date_str}: mood {level}/5 ({mood_label(level)}), session {duration} sec"
+            if note:
+                mood_str += f", note: {note}"
+            mood_history += mood_str + "\n"
+
+        # Calcola media mood
+        levels = [m.get("moodLevel", 0) for m in mood_data if m.get("moodLevel")]
+        if levels:
+            avg = sum(levels) / len(levels)
+            mood_history += f"  Average mood: {avg:.1f}/5 ({mood_label(round(avg))})\n"
+
+    # Badge
+    badges_str = ""
+    if unlocked_badges:
+        badges_str = f"\n- Unlocked badges: {', '.join(unlocked_badges)}"
+
+    # Donatore
+    donor_str = ""
+    if is_donator and donation_tier:
+        donor_str = f"\n- Supporter tier: {donation_tier} 💛"
+
     return f"""
 [USER DATA from Bodhio.life]
 - Name: {name}
+- App language: {language}
 - Minutes meditated today: {today_min}
+- Daily goal: {daily_goal} minutes
 - Total minutes meditated: {total_min}
+- Longest single session: {max_session} min
 - Current streak (consecutive days): {streak}
 - Total sessions completed: {sessions}
-Use this real data when the user asks about their practice.
+{badges_str}
+{donor_str}
+{daily_history}
+{mood_history}
+Use ALL this real data when the user asks about their practice, 
+mood, history, progress or any statistics.
+When the user asks about a specific day, look it up in the daily history.
+When commenting on mood trends, be empathetic and supportive.
 """
 
 # ─── Handlers ────────────────────────────────────────────────
@@ -160,9 +255,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         docs  = db.collection("telegram_link_tokens").stream()
         found = None
-
         for d in docs:
-            logger.info(f"Doc trovato: {d.id}")
             if d.id == token:
                 found = d
                 break
@@ -218,12 +311,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     text    = update.message.text
 
-    loop      = asyncio.get_event_loop()
+    loop = asyncio.get_event_loop()
+
+    # Recupera dati utente
     user_data = await loop.run_in_executor(
         None, lambda: get_user_data_sync(chat_id)
     )
 
-    user_context = build_user_context(user_data)
+    # Recupera dati mood se utente trovato
+    uid = user_data.get("uid", "")
+    mood_data = await loop.run_in_executor(
+        None, lambda: get_mood_data_sync(uid)
+    ) if uid else []
+
+    user_context = build_user_context(user_data, mood_data)
     full_system  = SYSTEM_PROMPT + user_context
 
     chat_histories[chat_id].append({"role": "user", "content": text})
