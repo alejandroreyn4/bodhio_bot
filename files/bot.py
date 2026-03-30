@@ -14,6 +14,10 @@ from telegram.ext import (
 )
 from groq import Groq
 
+# 🔥 Firebase Admin
+import firebase_admin
+from firebase_admin import credentials, firestore
+
 # ─── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
@@ -29,25 +33,27 @@ MODEL        = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 MAX_HISTORY  = int(os.getenv("MAX_HISTORY", "20"))
 PORT         = int(os.getenv("PORT", "8000"))
 
-# Allowed origins for CORS (set ALLOWED_ORIGINS env var, comma-separated)
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "https://bodhio.life,https://www.bodhio.life").split(",")
 
+# 🔑 Firebase init (una sola volta)
+if not firebase_admin._apps:
+    cred = credentials.Certificate(json.loads(os.environ["FIREBASE_KEY"]))
+    firebase_admin.initialize_app(cred)
+
+db = firestore.client()
+
+# ─── Prompt ────────────────────────────────────────────────────────────────────
 SYSTEM_PROMPT_TELEGRAM = """Sei Bodhi, l'assistente ufficiale di Bodhio.life dedicato alla meditazione e mindfulness.
 Rispondi SOLO su temi di meditazione, zen, mindfulness, respirazione, benessere mentale e consapevolezza.
 Se ti viene chiesto altro, reindirizza gentilmente verso temi di meditazione.
 Tono calmo, pacato, incoraggiante. Rispondi nella lingua dell'utente.
 Firma le risposte più lunghe con — Bodhi 🪷"""
 
-SYSTEM_PROMPT_WEB = """Sei Bodhi, l'assistente ufficiale di Bodhio.life dedicato alla meditazione e mindfulness.
-Rispondi SOLO su temi di meditazione, zen, mindfulness, respirazione, benessere mentale e consapevolezza.
-Se ti viene chiesto altro, reindirizza gentilmente verso temi di meditazione.
-Tono calmo, pacato, incoraggiante. Rispondi nella lingua dell'utente.
-Firma le risposte più lunghe con — Bodhi 🪷"""
+SYSTEM_PROMPT_WEB = SYSTEM_PROMPT_TELEGRAM
 
 # ─── State ─────────────────────────────────────────────────────────────────────
 groq_client = Groq(api_key=GROQ_API_KEY)
 chat_histories: dict[int, list[dict]] = defaultdict(list)
-
 
 # ─── Helpers ───────────────────────────────────────────────────────────────────
 def trim_history(chat_id: int) -> None:
@@ -85,13 +91,45 @@ def get_cors_headers(origin: str) -> dict:
         "Access-Control-Allow-Headers": "Content-Type",
     }
 
-
-# ─── Telegram Handlers ─────────────────────────────────────────────────────────
+# ─── 🔥 TELEGRAM HANDLERS ──────────────────────────────────────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     name = update.effective_user.first_name or "there"
+    chat_id = update.effective_chat.id
+
+    token = context.args[0] if context.args else None
+    print("TOKEN:", token)
+
+    if token:
+        try:
+            token_ref = db.collection("telegram_link_tokens").document(token)
+            token_doc = token_ref.get()
+
+            if not token_doc.exists or token_doc.to_dict().get("used"):
+                await update.message.reply_text("❌ Link non valido o già usato.")
+                return
+
+            uid = token_doc.to_dict()["uid"]
+
+            # 🔗 collega utente
+            db.collection("users").document(uid).update({
+                "telegramChatId": chat_id
+            })
+
+            # ✅ segna token usato
+            token_ref.update({"used": True})
+
+            await update.message.reply_text("✅ Account collegato con successo! 🙏")
+            return
+
+        except Exception as e:
+            print("ERROR LINK:", e)
+            await update.message.reply_text("⚠️ Errore durante il collegamento.")
+            return
+
+    # fallback normale
     await update.message.reply_text(
         f"Ciao {name}! Sono Bodhi 🪷, il tuo assistente di meditazione su Bodhio.life.\n\n"
-        "Posso aiutarti con tecniche di meditazione, mindfulness, respirazione e benessere mentale.\n\n"
+        "Posso aiutarti con tecniche di meditazione, mindfulness e benessere mentale.\n\n"
         "Comandi:\n"
         "  /start — mostra questo messaggio\n"
         "  /reset — cancella la cronologia\n"
@@ -127,7 +165,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def handle_unsupported(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("📎 Per ora gestisco solo messaggi di testo.")
 
-
 # ─── Web Endpoints ─────────────────────────────────────────────────────────────
 async def health_handler(request):
     return web.Response(text="OK")
@@ -141,11 +178,9 @@ async def telegram_webhook_handler(request, app):
 
 
 async def chat_handler(request):
-    """Proxy endpoint for Bodhio.life web chat widget."""
     origin = request.headers.get("Origin", "")
     cors = get_cors_headers(origin)
 
-    # Handle preflight
     if request.method == "OPTIONS":
         return web.Response(status=204, headers=cors)
 
@@ -161,9 +196,7 @@ async def chat_handler(request):
                 headers=cors,
             )
 
-        # Limit to last 10 messages for safety
         messages = messages[-10:]
-
         reply = await call_groq_web(messages)
 
         return web.Response(
@@ -180,7 +213,6 @@ async def chat_handler(request):
             content_type="application/json",
             headers=cors,
         )
-
 
 # ─── Main ──────────────────────────────────────────────────────────────────────
 async def main() -> None:
