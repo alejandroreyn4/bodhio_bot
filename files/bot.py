@@ -208,9 +208,6 @@ STRINGS = {
 }
 
 def t(key: str, lang: str, *args):
-    """Recupera la stringa tradotta per la lingua data.
-    Se la stringa è un callable (lambda), la chiama con *args.
-    Fallback su 'en' se la lingua non è disponibile."""
     lang = lang if lang in ("it", "en", "es") else "en"
     value = STRINGS.get(key, {}).get(lang) or STRINGS.get(key, {}).get("en", "")
     if callable(value):
@@ -303,7 +300,6 @@ def mood_label(level: int) -> str:
     return labels.get(level, "Sconosciuto")
 
 def ai_message(prompt: str, language: str = "it") -> str:
-    """Genera un messaggio con Groq dato un prompt interno."""
     lang_map = {"it": "Italian", "en": "English", "es": "Spanish"}
     lang = lang_map.get(language, "Italian")
     try:
@@ -536,7 +532,8 @@ async def send_daily_reminders(tg_app):
     loop       = asyncio.get_event_loop()
     now_utc    = datetime.now(timezone.utc)
     now_hour   = now_utc.hour
-    now_minute = now_utc.minute  # FIX: confronta anche i minuti
+    now_minute = now_utc.minute
+    today_str  = now_utc.strftime("%Y-%m-%d")
 
     users = await loop.run_in_executor(None, get_all_telegram_users_sync)
     for user in users:
@@ -552,9 +549,20 @@ async def send_daily_reminders(tg_app):
             continue
         if prefs.get("reminderHour") is None:
             continue
+
+        # Controlla l'ora
         if int(prefs["reminderHour"]) != now_hour:
             continue
-        if int(prefs.get("reminderMinute", 0)) != now_minute:  # FIX: controlla il minuto
+
+        # Finestra di tolleranza di 4 minuti per compensare i ritardi di Koyeb/UptimeRobot
+        # (UptimeRobot pinga ogni 5 min, quindi 4 min di tolleranza garantisce la copertura)
+        target_minute = int(prefs.get("reminderMinute", 0))
+        diff = (now_minute - target_minute) % 60
+        if diff > 4:
+            continue
+
+        # Deduplicazione: non inviare se già inviato oggi
+        if prefs.get("lastReminderSent") == today_str:
             continue
 
         name     = user.get("displayName", "")
@@ -572,6 +580,13 @@ async def send_daily_reminders(tg_app):
             try:
                 await tg_app.bot.send_message(chat_id=chat_id, text=message)
                 logger.info(f"📬 Reminder giornaliero inviato a {chat_id}")
+                # Salva la data per evitare duplicati nelle prossime esecuzioni dello stesso giorno
+                await loop.run_in_executor(
+                    None,
+                    lambda u=uid, p=prefs: save_notification_prefs_sync(
+                        u, {**p, "lastReminderSent": today_str}
+                    )
+                )
             except Exception as e:
                 logger.error(f"Errore invio reminder a {chat_id}: {e}")
 
@@ -769,7 +784,6 @@ async def check_post_session_mood(tg_app):
 
 # ─── Helpers per lingua nei comandi ──────────────────────────
 async def get_lang(chat_id: int, loop) -> tuple[str, str]:
-    """Ritorna (uid, language) per un dato chat_id."""
     user_data = await loop.run_in_executor(
         None, lambda: get_user_data_sync(chat_id)
     )
@@ -788,7 +802,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"/start ricevuto da {name}, args: {args}")
 
     if not args:
-        # Prova a leggere la lingua da Firebase; fallback su "it"
         _, lang = await get_lang(chat_id, loop)
         await update.message.reply_text(t("start_welcome", lang, name))
         return
@@ -796,7 +809,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     token = args[0].strip().replace("\n", "").replace("\r", "")
     logger.info(f"Token ricevuto: '{token}'")
 
-    # Prima del linking non abbiamo ancora la lingua → usiamo "it" come default
     lang = "it"
 
     if not db:
@@ -829,7 +841,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             {"used": True, "telegramChatId": chat_id}
         )
 
-        # Ora possiamo leggere la lingua dell'utente appena collegato
         user_doc = db.collection("users").document(uid).get()
         if user_doc.exists:
             lang = user_doc.to_dict().get("language", "it")
@@ -869,6 +880,8 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prefs["reminderEnabled"] = True
     prefs["reminderHour"]    = hour
     prefs["reminderMinute"]  = minute
+    # Reset della deduplicazione quando l'utente cambia orario
+    prefs.pop("lastReminderSent", None)
 
     await loop.run_in_executor(
         None, lambda: save_notification_prefs_sync(uid, prefs)
@@ -986,7 +999,7 @@ async def main():
     scheduler = AsyncIOScheduler(timezone="UTC")
     scheduler.add_job(
         send_daily_reminders,
-        CronTrigger(minute="*"),  # FIX: controlla ogni minuto invece che ogni ora
+        CronTrigger(minute="*"),  # ogni minuto — ora/minuto/deduplicazione gestiti internamente
         args=[tg_app],
         id="daily_reminders",
     )
