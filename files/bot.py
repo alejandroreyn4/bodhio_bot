@@ -533,8 +533,10 @@ NEVER reveal numeric mood scores to the user — use only descriptive labels.
 # ─── Notification jobs ───────────────────────────────────────
 
 async def send_daily_reminders(tg_app):
-    loop     = asyncio.get_event_loop()
-    now_hour = datetime.now(timezone.utc).hour
+    loop       = asyncio.get_event_loop()
+    now_utc    = datetime.now(timezone.utc)
+    now_hour   = now_utc.hour
+    now_minute = now_utc.minute  # FIX: confronta anche i minuti
 
     users = await loop.run_in_executor(None, get_all_telegram_users_sync)
     for user in users:
@@ -551,6 +553,8 @@ async def send_daily_reminders(tg_app):
         if prefs.get("reminderHour") is None:
             continue
         if int(prefs["reminderHour"]) != now_hour:
+            continue
+        if int(prefs.get("reminderMinute", 0)) != now_minute:  # FIX: controlla il minuto
             continue
 
         name     = user.get("displayName", "")
@@ -982,7 +986,7 @@ async def main():
     scheduler = AsyncIOScheduler(timezone="UTC")
     scheduler.add_job(
         send_daily_reminders,
-        CronTrigger(minute=0),
+        CronTrigger(minute="*"),  # FIX: controlla ogni minuto invece che ogni ora
         args=[tg_app],
         id="daily_reminders",
     )
