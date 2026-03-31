@@ -50,8 +50,8 @@ STRINGS = {
             "/reset — cancella cronologia chat\n"
             "/remind HH:MM — imposta reminder giornaliero (es. /remind 08:00)\n"
             "/remindoff — disattiva reminder giornaliero\n"
-            "/settings — mostra le tue preferenze notifiche
-            "/notifiche off — disattiva TUTTE le notifiche\n""
+            "/settings — mostra le tue preferenze notifiche\n"
+            "/notifiche off — disattiva TUTTE le notifiche"
         ),
         "en": lambda name: (
             f"Hi {name}! I'm Bodhi 🪷\n\n"
@@ -62,8 +62,8 @@ STRINGS = {
             "/reset — clear chat history\n"
             "/remind HH:MM — set daily reminder (e.g. /remind 08:00)\n"
             "/remindoff — disable daily reminder\n"
-            "/settings — show your notification preferences
-            "/notifiche off — disable ALL notifications\n""
+            "/settings — show your notification preferences\n"
+            "/notifiche off — disable ALL notifications"
         ),
         "es": lambda name: (
             f"¡Hola {name}! Soy Bodhi 🪷\n\n"
@@ -74,8 +74,8 @@ STRINGS = {
             "/reset — borrar historial del chat\n"
             "/remind HH:MM — configurar recordatorio diario (ej. /remind 08:00)\n"
             "/remindoff — desactivar recordatorio diario\n"
-            "/settings — ver tus preferencias de notificaciones
-            "/notifiche off — desactivar TODAS las notificaciones\n""
+            "/settings — ver tus preferencias de notificaciones\n"
+            "/notifiche off — desactivar TODAS las notificaciones"
         ),
     },
     "db_unavailable":     {"it": "⚠️ Database non disponibile.", "en": "⚠️ Database unavailable.", "es": "⚠️ Base de datos no disponible."},
@@ -597,6 +597,79 @@ async def check_post_session_mood(tg_app):
 
 
 # ─── Telegram handlers ────────────────────────────────────────────────────────
+async def send_stress_mood_alerts(tg_app):
+    """
+    If user recorded mood 1 (Molto Stressato) or 2 (Stressato) today,
+    send a caring check-in message. Max once per day per user.
+    """
+    loop      = asyncio.get_event_loop()
+    now       = datetime.now(timezone.utc)
+    today_str = now.strftime("%Y-%m-%d")
+
+    users = await loop.run_in_executor(None, get_all_telegram_users_sync)
+    for user in users:
+        chat_id = user.get("telegramChatId")
+        uid     = user.get("uid")
+        if not chat_id or not uid:
+            continue
+
+        prefs = await loop.run_in_executor(None, lambda u=uid: get_notification_prefs_sync(u))
+
+        # Skip if all notifications disabled
+        if prefs.get("inactivityAlertDisabled", False):
+            continue
+
+        # Deduplication: max 1 stress alert per day
+        if prefs.get("lastStressAlertSent") == today_str:
+            continue
+
+        mood_data = await loop.run_in_executor(None, lambda u=uid: get_mood_data_sync(u))
+        if not mood_data:
+            continue
+
+        # Check if any mood today is stressed (1 or 2)
+        stressed_today = False
+        for m in mood_data:
+            mood_date = m.get("date")
+            if not mood_date:
+                continue
+            try:
+                md = mood_date.replace(tzinfo=timezone.utc) if mood_date.tzinfo is None else mood_date
+                date_str = md.strftime("%Y-%m-%d")
+                if date_str == today_str and m.get("moodLevel", 0) <= 2:
+                    stressed_today = True
+                    break
+            except:
+                continue
+
+        if not stressed_today:
+            continue
+
+        name     = user.get("displayName", "")
+        language = user.get("language", "it")
+
+        prompt = (
+            f"The user {name} recorded a stressed or very stressed mood today. "
+            f"Send a short, warm, caring message asking how they are doing. "
+            f"Show genuine concern without being dramatic. "
+            f"Gently invite them to try a short meditation or breathing exercise. "
+            f"NEVER mention numeric mood scores. Max 3 sentences."
+        )
+        message = ai_message(prompt, language)
+        if message:
+            try:
+                await tg_app.bot.send_message(chat_id=chat_id, text=message)
+                logger.info(f"😟 Stress mood alert inviato a {chat_id}")
+                await loop.run_in_executor(
+                    None,
+                    lambda u=uid, p=prefs: save_notification_prefs_sync(
+                        u, {**p, "lastStressAlertSent": today_str}
+                    )
+                )
+            except Exception as e:
+                logger.error(f"Stress alert error {chat_id}: {e}")
+
+
 async def get_lang(chat_id, loop):
     user_data = await loop.run_in_executor(None, lambda: get_user_data_sync(chat_id))
     return user_data.get("uid",""), user_data.get("language","it")
@@ -878,6 +951,7 @@ async def main():
     scheduler.add_job(send_inactivity_alerts,  CronTrigger(hour=10, minute=0),             args=[tg_app], id="inactivity_alerts")
     scheduler.add_job(send_weekly_reports,     CronTrigger(day_of_week="mon",hour=9,minute=0), args=[tg_app], id="weekly_reports")
     scheduler.add_job(check_post_session_mood, CronTrigger(minute="*/5"),                      args=[tg_app], id="post_session_mood")
+    scheduler.add_job(send_stress_mood_alerts, CronTrigger(minute="*/10"),                     args=[tg_app], id="stress_mood_alerts")
     scheduler.start()
     logger.info("✅ Scheduler avviato")
 
