@@ -32,10 +32,13 @@ WEBHOOK_URL  = os.environ["WEBHOOK_URL"].rstrip("/")
 MODEL        = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 PORT         = int(os.getenv("PORT", "8000"))
 DB_NAME      = "ai-studio-3b998794-0fe8-40cf-8aad-6c900a81b085"
-
 INACTIVITY_DAYS = int(os.getenv("INACTIVITY_DAYS", "3"))
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS",
+    "https://bodhio.life,https://www.bodhio.life"
+).split(",")
 
-# ─── i18n ────────────────────────────────────────────────────
+# ─── i18n ─────────────────────────────────────────────────────────────────────
 STRINGS = {
     "start_welcome": {
         "it": lambda name: (
@@ -72,149 +75,49 @@ STRINGS = {
             "/settings — ver tus preferencias de notificaciones"
         ),
     },
-    "db_unavailable": {
-        "it": "⚠️ Database non disponibile.",
-        "en": "⚠️ Database unavailable.",
-        "es": "⚠️ Base de datos no disponible.",
-    },
-    "token_not_found": {
-        "it": "❌ Token non trovato.",
-        "en": "❌ Token not found.",
-        "es": "❌ Token no encontrado.",
-    },
-    "token_already_used": {
-        "it": "⚠️ Token già utilizzato.",
-        "en": "⚠️ Token already used.",
-        "es": "⚠️ Token ya utilizado.",
-    },
+    "db_unavailable":     {"it": "⚠️ Database non disponibile.", "en": "⚠️ Database unavailable.", "es": "⚠️ Base de datos no disponible."},
+    "token_not_found":    {"it": "❌ Token non trovato.", "en": "❌ Token not found.", "es": "❌ Token no encontrado."},
+    "token_already_used": {"it": "⚠️ Token già utilizzato.", "en": "⚠️ Token already used.", "es": "⚠️ Token ya utilizado."},
     "account_linked": {
-        "it": (
-            "✅ Account collegato con successo!\n\n"
-            "🪷 Da ora ti invierò promemoria personalizzati, "
-            "notifiche sui badge e aggiornamenti settimanali.\n\n"
-            "Usa /remind HH:MM per impostare il tuo reminder giornaliero!"
-        ),
-        "en": (
-            "✅ Account successfully linked!\n\n"
-            "🪷 I'll now send you personalized reminders, "
-            "badge notifications and weekly updates.\n\n"
-            "Use /remind HH:MM to set your daily reminder!"
-        ),
-        "es": (
-            "✅ ¡Cuenta vinculada con éxito!\n\n"
-            "🪷 Ahora te enviaré recordatorios personalizados, "
-            "notificaciones de insignias y actualizaciones semanales.\n\n"
-            "¡Usa /remind HH:MM para configurar tu recordatorio diario!"
-        ),
+        "it": "✅ Account collegato!\n\n🪷 Da ora ti invierò promemoria personalizzati.\n\nUsa /remind HH:MM per il reminder giornaliero!",
+        "en": "✅ Account linked!\n\n🪷 I'll now send you personalized reminders.\n\nUse /remind HH:MM to set your daily reminder!",
+        "es": "✅ ¡Cuenta vinculada!\n\n🪷 Ahora te enviaré recordatorios personalizados.\n\n¡Usa /remind HH:MM para configurar tu recordatorio diario!",
     },
-    "link_error": {
-        "it": "⚠️ Errore durante il collegamento.",
-        "en": "⚠️ Error during linking.",
-        "es": "⚠️ Error durante la vinculación.",
-    },
-    "remind_usage": {
-        "it": "Per impostare un reminder scrivi:\n/remind HH:MM  (es. /remind 08:00)",
-        "en": "To set a reminder write:\n/remind HH:MM  (e.g. /remind 08:00)",
-        "es": "Para configurar un recordatorio escribe:\n/remind HH:MM  (ej. /remind 08:00)",
-    },
-    "remind_invalid_format": {
-        "it": "Formato non valido. Usa HH:MM, ad esempio /remind 08:00",
-        "en": "Invalid format. Use HH:MM, e.g. /remind 08:00",
-        "es": "Formato inválido. Usa HH:MM, por ejemplo /remind 08:00",
-    },
-    "remind_not_linked": {
-        "it": "Account non collegato. Usa prima il link da Bodhio.life.",
-        "en": "Account not linked. Use the link from Bodhio.life first.",
-        "es": "Cuenta no vinculada. Usa primero el enlace de Bodhio.life.",
-    },
+    "link_error":         {"it": "⚠️ Errore durante il collegamento.", "en": "⚠️ Error during linking.", "es": "⚠️ Error durante la vinculación."},
+    "remind_usage":       {"it": "Scrivi:\n/remind HH:MM  (es. /remind 08:00)", "en": "Write:\n/remind HH:MM  (e.g. /remind 08:00)", "es": "Escribe:\n/remind HH:MM  (ej. /remind 08:00)"},
+    "remind_invalid_format": {"it": "Formato non valido. Usa HH:MM, es. /remind 08:00", "en": "Invalid format. Use HH:MM, e.g. /remind 08:00", "es": "Formato inválido. Usa HH:MM, ej. /remind 08:00"},
+    "remind_not_linked":  {"it": "Account non collegato. Usa prima il link da Bodhio.life.", "en": "Account not linked. Use the link from Bodhio.life first.", "es": "Cuenta no vinculada. Usa primero el enlace de Bodhio.life."},
     "remind_set": {
-        "it": lambda h, m: (
-            f"✅ Reminder impostato ogni giorno alle {h:02d}:{m:02d} UTC 🪷\n"
-            f"Usa /remindoff per disattivarlo."
-        ),
-        "en": lambda h, m: (
-            f"✅ Reminder set every day at {h:02d}:{m:02d} UTC 🪷\n"
-            f"Use /remindoff to disable it."
-        ),
-        "es": lambda h, m: (
-            f"✅ Recordatorio configurado cada día a las {h:02d}:{m:02d} UTC 🪷\n"
-            f"Usa /remindoff para desactivarlo."
-        ),
+        "it": lambda h, m: f"✅ Reminder impostato ogni giorno alle {h:02d}:{m:02d} UTC 🪷\nUsa /remindoff per disattivarlo.",
+        "en": lambda h, m: f"✅ Reminder set every day at {h:02d}:{m:02d} UTC 🪷\nUse /remindoff to disable it.",
+        "es": lambda h, m: f"✅ Recordatorio configurado cada día a las {h:02d}:{m:02d} UTC 🪷\nUsa /remindoff para desactivarlo.",
     },
-    "remind_off": {
-        "it": "🔕 Reminder giornaliero disattivato.",
-        "en": "🔕 Daily reminder disabled.",
-        "es": "🔕 Recordatorio diario desactivado.",
-    },
-    "not_linked": {
-        "it": "Account non collegato.",
-        "en": "Account not linked.",
-        "es": "Cuenta no vinculada.",
-    },
+    "remind_off":   {"it": "🔕 Reminder giornaliero disattivato.", "en": "🔕 Daily reminder disabled.", "es": "🔕 Recordatorio diario desactivado."},
+    "not_linked":   {"it": "Account non collegato.", "en": "Account not linked.", "es": "Cuenta no vinculada."},
     "settings": {
-        "it": lambda reminder_status, inactivity, weekly, days: (
-            f"Le tue preferenze notifiche:\n\n"
-            f"📅 Reminder giornaliero: {reminder_status}\n"
-            f"💤 Alert inattività ({days}gg): {inactivity}\n"
-            f"📊 Report settimanale: {weekly}\n\n"
-            f"Comandi:\n"
-            f"/remind HH:MM — imposta reminder\n"
-            f"/remindoff — disattiva reminder"
-        ),
-        "en": lambda reminder_status, inactivity, weekly, days: (
-            f"Your notification settings:\n\n"
-            f"📅 Daily reminder: {reminder_status}\n"
-            f"💤 Inactivity alert ({days}d): {inactivity}\n"
-            f"📊 Weekly report: {weekly}\n\n"
-            f"Commands:\n"
-            f"/remind HH:MM — set reminder\n"
-            f"/remindoff — disable reminder"
-        ),
-        "es": lambda reminder_status, inactivity, weekly, days: (
-            f"Tus preferencias de notificaciones:\n\n"
-            f"📅 Recordatorio diario: {reminder_status}\n"
-            f"💤 Alerta de inactividad ({days}d): {inactivity}\n"
-            f"📊 Informe semanal: {weekly}\n\n"
-            f"Comandos:\n"
-            f"/remind HH:MM — configurar recordatorio\n"
-            f"/remindoff — desactivar recordatorio"
-        ),
+        "it": lambda rs, ia, wr, days: f"Le tue preferenze notifiche:\n\n📅 Reminder giornaliero: {rs}\n💤 Alert inattività ({days}gg): {ia}\n📊 Report settimanale: {wr}\n\nComandi:\n/remind HH:MM — imposta reminder\n/remindoff — disattiva reminder",
+        "en": lambda rs, ia, wr, days: f"Your notification settings:\n\n📅 Daily reminder: {rs}\n💤 Inactivity alert ({days}d): {ia}\n📊 Weekly report: {wr}\n\nCommands:\n/remind HH:MM — set reminder\n/remindoff — disable reminder",
+        "es": lambda rs, ia, wr, days: f"Tus preferencias:\n\n📅 Recordatorio diario: {rs}\n💤 Alerta inactividad ({days}d): {ia}\n📊 Informe semanal: {wr}\n\nComandos:\n/remind HH:MM — configurar\n/remindoff — desactivar",
     },
     "settings_reminder_active": {
         "it": lambda h, m: f"attivo alle {h:02d}:{m:02d} UTC",
         "en": lambda h, m: f"active at {h:02d}:{m:02d} UTC",
         "es": lambda h, m: f"activo a las {h:02d}:{m:02d} UTC",
     },
-    "settings_reminder_off": {
-        "it": "disattivato",
-        "en": "disabled",
-        "es": "desactivado",
-    },
-    "settings_active": {
-        "it": "attivo",
-        "en": "active",
-        "es": "activo",
-    },
-    "settings_disabled": {
-        "it": "disattivato",
-        "en": "disabled",
-        "es": "desactivado",
-    },
-    "reset_done": {
-        "it": "🔄 Cronologia cancellata 🙏",
-        "en": "🔄 History cleared 🙏",
-        "es": "🔄 Historial borrado 🙏",
-    },
+    "settings_reminder_off": {"it": "disattivato", "en": "disabled", "es": "desactivado"},
+    "settings_active":       {"it": "attivo",      "en": "active",   "es": "activo"},
+    "settings_disabled":     {"it": "disattivato", "en": "disabled", "es": "desactivado"},
+    "reset_done":            {"it": "🔄 Cronologia cancellata 🙏", "en": "🔄 History cleared 🙏", "es": "🔄 Historial borrado 🙏"},
 }
 
-def t(key: str, lang: str, *args):
-    lang = lang if lang in ("it", "en", "es") else "en"
+def t(key, lang, *args):
+    lang  = lang if lang in ("it", "en", "es") else "en"
     value = STRINGS.get(key, {}).get(lang) or STRINGS.get(key, {}).get("en", "")
     if callable(value):
         return value(*args)
     return value
 
-# ─── Firebase ────────────────────────────────────────────────
+# ─── Firebase ─────────────────────────────────────────────────────────────────
 try:
     firebase_key = os.environ.get("FIREBASE_KEY")
     if not firebase_key:
@@ -228,312 +131,177 @@ except Exception as e:
     logger.error(f"❌ Firebase error: {e}")
     db = None
 
-# ─── AI ──────────────────────────────────────────────────────
-groq_client = Groq(api_key=GROQ_API_KEY)
+# ─── AI ───────────────────────────────────────────────────────────────────────
+groq_client    = Groq(api_key=GROQ_API_KEY)
 chat_histories = defaultdict(list)
 
 SYSTEM_PROMPT = """You are Bodhi 🪷, the official assistant of Bodhio.life — 
 a free meditation app with no subscriptions and no ads.
 
 LANGUAGE RULE: Always reply in the same language the user writes to you.
-If they write in Italian → reply in Italian.
-If they write in English → reply in English.
-If they write in Spanish → reply in Spanish.
-
-FORMATTING RULE: Never use Markdown formatting. No asterisks, no underscores,
-no backticks, no bold, no italic. Plain text only.
+FORMATTING RULE: Never use Markdown. Plain text only.
 
 Your personality: warm, calm, encouraging, present and mindful.
 
-MOOD SCALE (used internally only — NEVER show these numbers to the user):
-1 = Molto Stressato / Very Stressed / Muy Estresado
-2 = Stressato / Stressed / Estresado
-3 = Neutro / Neutral / Neutro
-4 = Calmo / Calm / Tranquilo
-5 = Molto Calmo / Very Calm / Muy Tranquilo
+MOOD SCALE (internal only — NEVER show numbers to user):
+1=Molto Stressato 2=Stressato 3=Neutro 4=Calmo 5=Molto Calmo
 
 IMPORTANT RULES:
-- When the user asks about their data, use the [USER DATA] section below.
-- Always refer to Bodhio.life for tracking — never suggest other apps.
-- Never mention Headspace, Calm, Insight Timer or any other app.
+- Use [USER DATA] section for personalized responses.
+- Always refer to Bodhio.life for tracking.
+- Never mention other apps (Headspace, Calm, etc.).
+- NEVER show numeric mood scores to users.
 - Keep responses concise and warm.
-
-MOOD RULE:
-- When the user asks about their mood, look at the mood history in USER DATA.
-  Describe their mood using only the label (e.g. "stressato", "calmo"),
-  NEVER mention the numeric score like "1/5" or "3/5". Speak naturally and
-  empathetically, as a caring friend would — not like a data report.
-- If the most recent mood is 1 or 2 (stressed), show genuine concern, warmly
-  ask what is happening, and offer a breathing exercise or short meditation.
-  Example: "Vedo che ti sei sentito molto stressato. Vuoi raccontarmi cosa
-  sta succedendo? Posso guidarti in un breve esercizio di respirazione."
-- If the most recent mood is 4 or 5 (calm), congratulate them warmly and
-  encourage them to keep up the good work. No numbers, just warm words.
-  Example: "Sono felice che tu ti senta così sereno oggi, è bellissimo!"
-- If mood data shows a negative trend (mood getting worse over days),
-  gently mention it and offer support — without quoting any numbers.
-- If mood data is empty, invite them to record their mood after the next
-  session on Bodhio.life — it only takes a second and helps track wellbeing.
-- Never say you don't have mood data if it exists in USER DATA.
-- NEVER use numeric scores (1/5, 2/5, 3/5, 4/5, 5/5 etc.) in any response
-  about mood. The numbers are for internal use only.
 """
 
-# ─── Utility ─────────────────────────────────────────────────
-def strip_markdown(text: str) -> str:
+# ─── Utility ──────────────────────────────────────────────────────────────────
+def strip_markdown(text):
     text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
-    text = re.sub(r'__(.*?)__', r'\1', text)
-    text = re.sub(r'\*(.*?)\*', r'\1', text)
-    text = re.sub(r'_(.*?)_', r'\1', text)
-    text = re.sub(r'`(.*?)`', r'\1', text)
-    text = re.sub(r'#{1,6}\s', '', text)
+    text = re.sub(r'__(.*?)__',     r'\1', text)
+    text = re.sub(r'\*(.*?)\*',     r'\1', text)
+    text = re.sub(r'_(.*?)_',       r'\1', text)
+    text = re.sub(r'`(.*?)`',       r'\1', text)
+    text = re.sub(r'#{1,6}\s',      '',    text)
     return text.strip()
 
-def mood_label(level: int) -> str:
-    labels = {
-        1: "Molto Stressato",
-        2: "Stressato",
-        3: "Neutro",
-        4: "Calmo",
-        5: "Molto Calmo"
-    }
-    return labels.get(level, "Sconosciuto")
+def mood_label(level):
+    return {1:"Molto Stressato",2:"Stressato",3:"Neutro",4:"Calmo",5:"Molto Calmo"}.get(level,"Sconosciuto")
 
-def ai_message(prompt: str, language: str = "it") -> str:
-    lang_map = {"it": "Italian", "en": "English", "es": "Spanish"}
+def ai_message(prompt, language="it"):
+    lang_map = {"it":"Italian","en":"English","es":"Spanish"}
     lang = lang_map.get(language, "Italian")
     try:
-        completion = groq_client.chat.completions.create(
+        c = groq_client.chat.completions.create(
             model=MODEL,
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        f"You are Bodhi 🪷, a warm and mindful meditation assistant. "
-                        f"Reply ONLY in {lang}. "
-                        f"Never use Markdown. Plain text only. Be concise and caring."
-                    ),
-                },
-                {"role": "user", "content": prompt},
+                {"role":"system","content":f"You are Bodhi 🪷, a warm meditation assistant. Reply ONLY in {lang}. No Markdown. Be concise and caring."},
+                {"role":"user","content":prompt},
             ],
         )
-        return strip_markdown(completion.choices[0].message.content)
+        return strip_markdown(c.choices[0].message.content)
     except Exception as e:
-        logger.error(f"Errore AI: {e}")
+        logger.error(f"AI error: {e}")
         return ""
 
-# ─── Firebase data ────────────────────────────────────────────
-def get_user_data_sync(chat_id: int) -> dict:
-    if not db:
-        return {}
+# ─── Firebase helpers ─────────────────────────────────────────────────────────
+def get_user_data_sync(chat_id):
+    if not db: return {}
     try:
-        users = (
-            db.collection("users")
-            .where("telegramChatId", "==", chat_id)
-            .limit(1)
-            .stream()
-        )
-        for user in users:
-            return {"uid": user.id, **user.to_dict()}
+        for u in db.collection("users").where("telegramChatId","==",chat_id).limit(1).stream():
+            return {"uid": u.id, **u.to_dict()}
         return {}
     except Exception as e:
-        logger.error(f"Errore lettura utente: {e}")
-        return {}
+        logger.error(f"get_user_data: {e}"); return {}
 
-def get_all_telegram_users_sync() -> list:
-    if not db:
-        return []
+def get_all_telegram_users_sync():
+    if not db: return []
     try:
-        users = (
-            db.collection("users")
-            .where("telegramChatId", "!=", None)
-            .stream()
-        )
-        result = []
-        for u in users:
-            d = u.to_dict()
-            if d.get("telegramChatId"):
-                result.append({"uid": u.id, **d})
-        return result
+        return [{"uid":u.id,**u.to_dict()} for u in db.collection("users").where("telegramChatId","!=",None).stream() if u.to_dict().get("telegramChatId")]
     except Exception as e:
-        logger.error(f"Errore lettura utenti: {e}")
-        return []
+        logger.error(f"get_all_users: {e}"); return []
 
-def get_mood_data_sync(uid: str) -> list:
-    if not db or not uid:
-        return []
+def get_mood_data_sync(uid):
+    if not db or not uid: return []
     try:
-        moods = (
-            db.collection("moods")
-            .where("userId", "==", uid)
-            .limit(20)
-            .stream()
-        )
-        result = []
-        for m in moods:
-            d = m.to_dict()
-            result.append({
-                "date": d.get("createdAt"),
-                "moodLevel": int(d.get("moodLevel", 0)),
-                "sessionDuration": int(d.get("sessionDuration", 0)),
-                "note": d.get("note"),
-            })
-        result.sort(
-            key=lambda x: x["date"] if x["date"] else "",
-            reverse=True
-        )
+        result = [{"date":m.to_dict().get("createdAt"),"moodLevel":int(m.to_dict().get("moodLevel",0)),"sessionDuration":int(m.to_dict().get("sessionDuration",0)),"note":m.to_dict().get("note")} for m in db.collection("moods").where("userId","==",uid).limit(20).stream()]
+        result.sort(key=lambda x: x["date"] if x["date"] else "", reverse=True)
         return result[:10]
     except Exception as e:
-        logger.error(f"Errore lettura mood: {e}")
-        return []
+        logger.error(f"get_mood: {e}"); return []
 
-def get_latest_session_sync(uid: str) -> dict | None:
-    if not db or not uid:
-        return None
+def get_latest_session_sync(uid):
+    if not db or not uid: return None
     try:
-        sessions = (
-            db.collection("sessions")
-            .where("userId", "==", uid)
-            .limit(20)
-            .stream()
-        )
-        result = []
-        for s in sessions:
-            d = s.to_dict()
-            result.append({"id": s.id, **d})
-        result.sort(
-            key=lambda x: x.get("createdAt") if x.get("createdAt") else "",
-            reverse=True
-        )
+        result = [{"id":s.id,**s.to_dict()} for s in db.collection("sessions").where("userId","==",uid).limit(20).stream()]
+        result.sort(key=lambda x: x.get("createdAt") or "", reverse=True)
         return result[0] if result else None
     except Exception as e:
-        logger.error(f"Errore lettura sessioni: {e}")
-        return None
+        logger.error(f"get_session: {e}"); return None
 
-def save_notification_prefs_sync(uid: str, prefs: dict):
-    if not db or not uid:
-        return
+def save_notification_prefs_sync(uid, prefs):
+    if not db or not uid: return
     try:
-        db.collection("users").document(uid).set(
-            {"notificationPrefs": prefs}, merge=True
-        )
+        db.collection("users").document(uid).set({"notificationPrefs": prefs}, merge=True)
     except Exception as e:
-        logger.error(f"Errore salvataggio prefs: {e}")
+        logger.error(f"save_prefs: {e}")
 
-def get_notification_prefs_sync(uid: str) -> dict:
-    if not db or not uid:
-        return {}
+def get_notification_prefs_sync(uid):
+    if not db or not uid: return {}
     try:
         doc = db.collection("users").document(uid).get()
-        if doc.exists:
-            return doc.to_dict().get("notificationPrefs", {})
-        return {}
+        return doc.to_dict().get("notificationPrefs", {}) if doc.exists else {}
     except Exception as e:
-        logger.error(f"Errore lettura prefs: {e}")
-        return {}
+        logger.error(f"get_prefs: {e}"); return {}
 
-def build_user_context(user_data: dict, mood_data: list) -> str:
-    if not user_data:
-        return ""
+def build_user_context(user_data, mood_data):
+    if not user_data: return ""
+    name         = user_data.get("displayName","")
+    today_min    = int(user_data.get("todayMin",0))
+    total_min    = int(user_data.get("totalMinutes",0))
+    streak       = int(user_data.get("streak",0))
+    sessions     = int(user_data.get("sessions",0))
+    daily_goal   = int(user_data.get("dailyGoal",0))
+    max_session  = int(user_data.get("maxSessionDuration",0))
+    is_donator   = user_data.get("isDonator",False)
+    donation_tier = user_data.get("donationTier","")
+    unlocked_badges = user_data.get("unlockedBadges",[])
+    language     = user_data.get("language","it")
+    daily_minutes = user_data.get("dailyMinutes",{})
 
-    name            = user_data.get("displayName", "")
-    today_min       = int(user_data.get("todayMin", 0))
-    total_min       = int(user_data.get("totalMinutes", 0))
-    streak          = int(user_data.get("streak", 0))
-    sessions        = int(user_data.get("sessions", 0))
-    daily_goal      = int(user_data.get("dailyGoal", 0))
-    max_session     = int(user_data.get("maxSessionDuration", 0))
-    is_donator      = user_data.get("isDonator", False)
-    donation_tier   = user_data.get("donationTier", "")
-    unlocked_badges = user_data.get("unlockedBadges", [])
-    language        = user_data.get("language", "it")
-
-    daily_minutes = user_data.get("dailyMinutes", {})
     daily_history = ""
     if daily_minutes:
-        sorted_days = sorted(daily_minutes.items())
-        daily_history = "\n- Meditation history by day:\n"
-        for date, minutes in sorted_days:
-            daily_history += f"  {date}: {int(minutes)} min\n"
+        daily_history = "\n- Meditation history by day:\n" + "".join(f"  {d}: {int(v)} min\n" for d,v in sorted(daily_minutes.items()))
 
     mood_history = ""
     if mood_data:
-        mood_history = "\n- Recent mood history (most recent first):\n"
+        mood_history = "\n- Recent mood history:\n"
         for m in mood_data:
-            date     = m.get("date")
-            level    = m.get("moodLevel", 0)
-            duration = m.get("sessionDuration", 0)
-            note     = m.get("note")
-            try:
-                date_str = date.strftime("%Y-%m-%d %H:%M") if hasattr(date, 'strftime') else str(date)
-            except Exception:
-                date_str = str(date)
-            mood_str = (
-                f"  {date_str}: mood {level}/5 "
-                f"({mood_label(level)}), "
-                f"session {duration} sec"
-            )
-            if note:
-                mood_str += f", note: {note}"
-            mood_history += mood_str + "\n"
-
-        levels = [m.get("moodLevel", 0) for m in mood_data if m.get("moodLevel")]
+            date = m.get("date")
+            try: date_str = date.strftime("%Y-%m-%d %H:%M") if hasattr(date,'strftime') else str(date)
+            except: date_str = str(date)
+            mood_history += f"  {date_str}: mood {m.get('moodLevel',0)}/5 ({mood_label(m.get('moodLevel',0))}), session {m.get('sessionDuration',0)}s"
+            if m.get("note"): mood_history += f", note: {m['note']}"
+            mood_history += "\n"
+        levels = [m.get("moodLevel",0) for m in mood_data if m.get("moodLevel")]
         if levels:
-            avg = sum(levels) / len(levels)
-            mood_history += (
-                f"  Average mood: {avg:.1f}/5 "
-                f"({mood_label(round(avg))})\n"
-            )
-
-        latest       = mood_data[0]
-        latest_level = latest.get("moodLevel", 0)
-        mood_history += (
-            f"\n- MOST RECENT MOOD: {latest_level}/5 "
-            f"({mood_label(latest_level)}) — "
-            f"use this to respond empathetically. "
-            f"NEVER show this number to the user.\n"
-        )
+            avg = sum(levels)/len(levels)
+            mood_history += f"  Average: {avg:.1f}/5 ({mood_label(round(avg))})\n"
+        latest = mood_data[0]
+        mood_history += f"\n- MOST RECENT MOOD: {latest.get('moodLevel',0)}/5 ({mood_label(latest.get('moodLevel',0))}) — NEVER show this number to user.\n"
     else:
-        mood_history = "\n- Mood history: no data yet. Invite the user to record their mood after the next session on Bodhio.life.\n"
+        mood_history = "\n- Mood history: no data yet.\n"
 
-    badges_str = ""
-    if unlocked_badges:
-        badges_str = f"\n- Unlocked badges: {', '.join(str(b) for b in unlocked_badges)}"
-
-    donor_str = ""
-    if is_donator and donation_tier:
-        donor_str = f"\n- Supporter tier: {donation_tier} 💛"
+    badges_str = f"\n- Unlocked badges: {', '.join(str(b) for b in unlocked_badges)}" if unlocked_badges else ""
+    donor_str  = f"\n- Supporter tier: {donation_tier} 💛" if is_donator and donation_tier else ""
 
     return f"""
 [USER DATA from Bodhio.life]
 - Name: {name}
-- App language: {language}
-- Minutes meditated today: {today_min}
-- Daily goal: {daily_goal} minutes
-- Total minutes meditated: {total_min}
-- Longest single session: {max_session} min
-- Current streak (consecutive days): {streak}
-- Total sessions completed: {sessions}
-{badges_str}
-{donor_str}
+- Language: {language}
+- Minutes today: {today_min} / goal: {daily_goal}
+- Total minutes: {total_min}
+- Longest session: {max_session} min
+- Streak: {streak} days
+- Total sessions: {sessions}
+{badges_str}{donor_str}
 {daily_history}
 {mood_history}
-Use ALL this real data when the user asks about their practice,
-mood, history, progress or any statistics.
-When the user asks about a specific day, look it up in the daily history.
-When commenting on mood trends, be empathetic and supportive.
-Never say you don't have data if it exists above.
-NEVER reveal numeric mood scores to the user — use only descriptive labels.
+Use ALL this data when user asks about their practice.
+NEVER reveal numeric mood scores to the user.
 """
 
-# ─── Notification jobs ───────────────────────────────────────
+# ─── Notification jobs ────────────────────────────────────────────────────────
 
 async def send_daily_reminders(tg_app):
-    loop       = asyncio.get_event_loop()
-    now_utc    = datetime.now(timezone.utc)
-    now_hour   = now_utc.hour
-    now_minute = now_utc.minute
-    today_str  = now_utc.strftime("%Y-%m-%d")
+    """
+    Triggered every minute by scheduler OR by /tick endpoint (UptimeRobot).
+    Uses a 4-minute tolerance window + daily deduplication.
+    """
+    loop      = asyncio.get_event_loop()
+    now_utc   = datetime.now(timezone.utc)
+    now_h     = now_utc.hour
+    now_m     = now_utc.minute
+    today_str = now_utc.strftime("%Y-%m-%d")
 
     users = await loop.run_in_executor(None, get_all_telegram_users_sync)
     for user in users:
@@ -542,27 +310,24 @@ async def send_daily_reminders(tg_app):
         if not chat_id or not uid:
             continue
 
-        prefs = await loop.run_in_executor(
-            None, lambda u=uid: get_notification_prefs_sync(u)
-        )
+        prefs = await loop.run_in_executor(None, lambda u=uid: get_notification_prefs_sync(u))
         if not prefs.get("reminderEnabled", False):
             continue
         if prefs.get("reminderHour") is None:
             continue
 
-        # Controlla l'ora
-        if int(prefs["reminderHour"]) != now_hour:
-            continue
-
-        # Finestra di tolleranza di 4 minuti per compensare i ritardi di Koyeb/UptimeRobot
-        # (UptimeRobot pinga ogni 5 min, quindi 4 min di tolleranza garantisce la copertura)
-        target_minute = int(prefs.get("reminderMinute", 0))
-        diff = (now_minute - target_minute) % 60
-        if diff > 4:
-            continue
-
-        # Deduplicazione: non inviare se già inviato oggi
+        # Deduplication: max 1 reminder per day
         if prefs.get("lastReminderSent") == today_str:
+            continue
+
+        # Check hour matches
+        if int(prefs["reminderHour"]) != now_h:
+            continue
+
+        # 8-minute tolerance window to survive Koyeb wake-up delays
+        target_m = int(prefs.get("reminderMinute", 0))
+        diff = (now_m - target_m) % 60
+        if diff > 8:
             continue
 
         name     = user.get("displayName", "")
@@ -572,29 +337,27 @@ async def send_daily_reminders(tg_app):
         prompt = (
             f"Send a warm, short daily meditation reminder to {name}. "
             f"Their current streak is {streak} days. "
-            f"Encourage them to keep the streak going. "
-            f"Be motivating but gentle. Max 3 sentences."
+            f"Encourage them to keep it going. Max 3 sentences."
         )
         message = ai_message(prompt, language)
         if message:
             try:
                 await tg_app.bot.send_message(chat_id=chat_id, text=message)
-                logger.info(f"📬 Reminder giornaliero inviato a {chat_id}")
-                # Salva la data per evitare duplicati nelle prossime esecuzioni dello stesso giorno
+                logger.info(f"📬 Reminder inviato a {chat_id}")
                 await loop.run_in_executor(
                     None,
-                    lambda u=uid, p=prefs: save_notification_prefs_sync(
-                        u, {**p, "lastReminderSent": today_str}
-                    )
+                    lambda u=uid, p=prefs: save_notification_prefs_sync(u, {**p, "lastReminderSent": today_str})
                 )
             except Exception as e:
-                logger.error(f"Errore invio reminder a {chat_id}: {e}")
+                logger.error(f"Reminder error {chat_id}: {e}")
 
 
 async def send_inactivity_alerts(tg_app):
-    loop   = asyncio.get_event_loop()
-    now    = datetime.now(timezone.utc)
-    cutoff = now - timedelta(days=INACTIVITY_DAYS)
+    """Max 1 alert per day per user — FIX: added lastInactivitySent deduplication."""
+    loop      = asyncio.get_event_loop()
+    now       = datetime.now(timezone.utc)
+    cutoff    = now - timedelta(days=INACTIVITY_DAYS)
+    today_str = now.strftime("%Y-%m-%d")
 
     users = await loop.run_in_executor(None, get_all_telegram_users_sync)
     for user in users:
@@ -603,16 +366,25 @@ async def send_inactivity_alerts(tg_app):
         if not chat_id or not uid:
             continue
 
-        prefs = await loop.run_in_executor(
-            None, lambda u=uid: get_notification_prefs_sync(u)
-        )
+        prefs = await loop.run_in_executor(None, lambda u=uid: get_notification_prefs_sync(u))
         if prefs.get("inactivityAlertDisabled", False):
             continue
 
-        session = await loop.run_in_executor(
-            None, lambda u=uid: get_latest_session_sync(u)
-        )
+        # FIX: deduplication — max 1 alert per day
+        if prefs.get("lastInactivitySent") == today_str:
+            continue
 
+        # FIX: se l'utente ha già meditato oggi, non inviare l'alert
+        today_min = int(user.get("todayMin", 0))
+        if today_min > 0:
+            continue
+
+        # Controlla anche dailyMinutes per oggi (doppia verifica)
+        daily_minutes = user.get("dailyMinutes", {})
+        if daily_minutes.get(today_str, 0) > 0:
+            continue
+
+        session   = await loop.run_in_executor(None, lambda u=uid: get_latest_session_sync(u))
         last_date = None
         if session:
             raw = session.get("createdAt")
@@ -628,17 +400,22 @@ async def send_inactivity_alerts(tg_app):
 
         prompt = (
             f"The user {name} hasn't meditated in {INACTIVITY_DAYS} days. "
-            f"Their last streak was {streak} days. "
-            f"Send a gentle, warm message to invite them back to their practice. "
-            f"Don't be pushy. Be like a caring friend. Max 3 sentences."
+            f"Last streak was {streak} days. "
+            f"Send a gentle, warm message to invite them back. "
+            f"Don't be pushy. Max 3 sentences."
         )
         message = ai_message(prompt, language)
         if message:
             try:
                 await tg_app.bot.send_message(chat_id=chat_id, text=message)
                 logger.info(f"💤 Inactivity alert inviato a {chat_id}")
+                # FIX: save date to avoid duplicates
+                await loop.run_in_executor(
+                    None,
+                    lambda u=uid, p=prefs: save_notification_prefs_sync(u, {**p, "lastInactivitySent": today_str})
+                )
             except Exception as e:
-                logger.error(f"Errore invio inactivity alert a {chat_id}: {e}")
+                logger.error(f"Inactivity error {chat_id}: {e}")
 
 
 async def send_weekly_reports(tg_app):
@@ -651,29 +428,20 @@ async def send_weekly_reports(tg_app):
         if not chat_id or not uid:
             continue
 
-        prefs = await loop.run_in_executor(
-            None, lambda u=uid: get_notification_prefs_sync(u)
-        )
+        prefs = await loop.run_in_executor(None, lambda u=uid: get_notification_prefs_sync(u))
         if prefs.get("weeklyReportDisabled", False):
             continue
 
-        mood_data = await loop.run_in_executor(
-            None, lambda u=uid: get_mood_data_sync(u)
-        )
-
-        name      = user.get("displayName", "")
-        language  = user.get("language", "it")
-        total_min = int(user.get("totalMinutes", 0))
-        streak    = int(user.get("streak", 0))
-        sessions  = int(user.get("sessions", 0))
-
-        daily_minutes = user.get("dailyMinutes", {})
-        now      = datetime.now(timezone.utc)
-        week_ago = now - timedelta(days=7)
-        week_min = sum(
-            int(v) for k, v in daily_minutes.items()
-            if k >= week_ago.strftime("%Y-%m-%d")
-        )
+        mood_data  = await loop.run_in_executor(None, lambda u=uid: get_mood_data_sync(u))
+        name       = user.get("displayName","")
+        language   = user.get("language","it")
+        total_min  = int(user.get("totalMinutes",0))
+        streak     = int(user.get("streak",0))
+        sessions   = int(user.get("sessions",0))
+        now        = datetime.now(timezone.utc)
+        week_ago   = now - timedelta(days=7)
+        daily_min  = user.get("dailyMinutes",{})
+        week_min   = sum(int(v) for k,v in daily_min.items() if k >= week_ago.strftime("%Y-%m-%d"))
 
         recent_moods = []
         for m in mood_data:
@@ -681,34 +449,27 @@ async def send_weekly_reports(tg_app):
             if raw:
                 try:
                     md = raw.replace(tzinfo=timezone.utc) if raw.tzinfo is None else raw
-                    if md > week_ago:
-                        recent_moods.append(m.get("moodLevel", 0))
-                except Exception:
-                    pass
+                    if md > week_ago: recent_moods.append(m.get("moodLevel",0))
+                except: pass
 
         avg_mood_str = ""
         if recent_moods:
-            avg = sum(recent_moods) / len(recent_moods)
+            avg = sum(recent_moods)/len(recent_moods)
             avg_mood_str = f"Average mood this week: {mood_label(round(avg))}."
 
         prompt = (
             f"Generate a warm weekly meditation report for {name}. "
-            f"This week they meditated for {week_min} minutes. "
-            f"Total sessions ever: {sessions}. "
-            f"Current streak: {streak} days. "
-            f"Total minutes ever: {total_min}. "
-            f"{avg_mood_str} "
-            f"Celebrate their progress, mention one highlight, "
-            f"and give a gentle encouragement for next week. "
-            f"Keep it under 5 sentences. Warm and personal tone."
+            f"This week: {week_min} minutes. Sessions ever: {sessions}. "
+            f"Streak: {streak} days. Total: {total_min} min. {avg_mood_str} "
+            f"Celebrate progress, mention one highlight, gentle encouragement. Max 5 sentences."
         )
         message = ai_message(prompt, language)
         if message:
             try:
                 await tg_app.bot.send_message(chat_id=chat_id, text=message)
-                logger.info(f"📊 Report settimanale inviato a {chat_id}")
+                logger.info(f"📊 Weekly report inviato a {chat_id}")
             except Exception as e:
-                logger.error(f"Errore invio report a {chat_id}: {e}")
+                logger.error(f"Weekly report error {chat_id}: {e}")
 
 
 async def check_post_session_mood(tg_app):
@@ -722,14 +483,12 @@ async def check_post_session_mood(tg_app):
         if not chat_id or not uid:
             continue
 
-        mood_data = await loop.run_in_executor(
-            None, lambda u=uid: get_mood_data_sync(u)
-        )
+        mood_data = await loop.run_in_executor(None, lambda u=uid: get_mood_data_sync(u))
         if not mood_data:
             continue
 
-        latest_mood = mood_data[0]
-        mood_date   = latest_mood.get("date")
+        latest    = mood_data[0]
+        mood_date = latest.get("date")
         if not mood_date:
             continue
 
@@ -737,88 +496,70 @@ async def check_post_session_mood(tg_app):
             md = mood_date.replace(tzinfo=timezone.utc) if mood_date.tzinfo is None else mood_date
             if (now - md).total_seconds() > 600:
                 continue
-        except Exception:
-            continue
+        except: continue
 
-        prefs = await loop.run_in_executor(
-            None, lambda u=uid: get_notification_prefs_sync(u)
-        )
-        try:
-            mood_date_str = mood_date.strftime("%Y-%m-%d %H:%M") if hasattr(mood_date, 'strftime') else str(mood_date)
-        except Exception:
-            mood_date_str = str(mood_date)
+        prefs = await loop.run_in_executor(None, lambda u=uid: get_notification_prefs_sync(u))
+        try:    mood_date_str = mood_date.strftime("%Y-%m-%d %H:%M") if hasattr(mood_date,'strftime') else str(mood_date)
+        except: mood_date_str = str(mood_date)
 
         if prefs.get("lastMoodNotified") == mood_date_str:
             continue
 
-        level    = latest_mood.get("moodLevel", 0)
-        name     = user.get("displayName", "")
-        language = user.get("language", "it")
-        duration = latest_mood.get("sessionDuration", 0)
-        note     = latest_mood.get("note", "")
-        note_str = f'They also left a note: "{note}".' if note else ""
+        level    = latest.get("moodLevel",0)
+        name     = user.get("displayName","")
+        language = user.get("language","it")
+        duration = latest.get("sessionDuration",0)
+        note     = latest.get("note","")
+        note_str = f'They left a note: "{note}".' if note else ""
 
         prompt = (
-            f"The user {name} just finished a meditation session of {duration} seconds "
-            f"and recorded their mood as: {mood_label(level)}. {note_str} "
-            f"Send a short, warm, empathetic message reacting to their mood. "
-            f"If they felt stressed, show concern and offer support. "
-            f"If they felt calm or very calm, celebrate with them warmly. "
-            f"If neutral, acknowledge it kindly. "
-            f"NEVER mention any numeric mood score. Max 3 sentences."
+            f"User {name} finished a {duration}s meditation session. "
+            f"Mood: {mood_label(level)}. {note_str} "
+            f"Send a short warm empathetic message. "
+            f"If stressed: show concern, offer breathing exercise. "
+            f"If calm: celebrate warmly. NEVER mention numeric scores. Max 3 sentences."
         )
         message = ai_message(prompt, language)
         if message:
             try:
                 await tg_app.bot.send_message(chat_id=chat_id, text=message)
-                logger.info(f"🧘 Post-session mood message inviato a {chat_id}")
+                logger.info(f"🧘 Post-session mood inviato a {chat_id}")
                 await loop.run_in_executor(
                     None,
-                    lambda u=uid, d=mood_date_str, p=prefs: save_notification_prefs_sync(
-                        u, {**p, "lastMoodNotified": d}
-                    )
+                    lambda u=uid, d=mood_date_str, p=prefs: save_notification_prefs_sync(u, {**p, "lastMoodNotified": d})
                 )
             except Exception as e:
-                logger.error(f"Errore invio post-session a {chat_id}: {e}")
+                logger.error(f"Post-session error {chat_id}: {e}")
 
 
-# ─── Helpers per lingua nei comandi ──────────────────────────
-async def get_lang(chat_id: int, loop) -> tuple[str, str]:
-    user_data = await loop.run_in_executor(
-        None, lambda: get_user_data_sync(chat_id)
-    )
-    uid  = user_data.get("uid", "")
-    lang = user_data.get("language", "it")
-    return uid, lang
+# ─── Telegram handlers ────────────────────────────────────────────────────────
+async def get_lang(chat_id, loop):
+    user_data = await loop.run_in_executor(None, lambda: get_user_data_sync(chat_id))
+    return user_data.get("uid",""), user_data.get("language","it")
 
 
-# ─── Handlers ────────────────────────────────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     name    = update.effective_user.first_name or ""
     args    = context.args
     loop    = asyncio.get_event_loop()
-
-    logger.info(f"/start ricevuto da {name}, args: {args}")
+    logger.info(f"/start da {name}, args: {args}")
 
     if not args:
         _, lang = await get_lang(chat_id, loop)
         await update.message.reply_text(t("start_welcome", lang, name))
         return
 
-    token = args[0].strip().replace("\n", "").replace("\r", "")
-    logger.info(f"Token ricevuto: '{token}'")
-
-    lang = "it"
+    token = args[0].strip().replace("\n","").replace("\r","")
+    lang  = "it"
 
     if not db:
         await update.message.reply_text(t("db_unavailable", lang))
         return
 
     try:
-        docs  = db.collection("telegram_link_tokens").stream()
         found = None
-        for d in docs:
+        for d in db.collection("telegram_link_tokens").stream():
             if d.id == token:
                 found = d
                 break
@@ -834,38 +575,31 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(t("token_already_used", lang))
             return
 
-        db.collection("users").document(uid).set(
-            {"telegramChatId": chat_id}, merge=True
-        )
-        db.collection("telegram_link_tokens").document(token).update(
-            {"used": True, "telegramChatId": chat_id}
-        )
+        db.collection("users").document(uid).set({"telegramChatId": chat_id}, merge=True)
+        db.collection("telegram_link_tokens").document(token).update({"used": True, "telegramChatId": chat_id})
 
         user_doc = db.collection("users").document(uid).get()
         if user_doc.exists:
-            lang = user_doc.to_dict().get("language", "it")
+            lang = user_doc.to_dict().get("language","it")
 
         await update.message.reply_text(t("account_linked", lang))
-
     except Exception as e:
-        logger.error(f"Errore linking: {e}")
+        logger.error(f"Link error: {e}")
         await update.message.reply_text(t("link_error", lang))
 
 
 async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    loop    = asyncio.get_event_loop()
+    chat_id   = update.effective_chat.id
+    loop      = asyncio.get_event_loop()
     uid, lang = await get_lang(chat_id, loop)
 
     if not context.args:
         await update.message.reply_text(t("remind_usage", lang))
         return
 
-    time_str = context.args[0].strip()
     try:
-        hour, minute = map(int, time_str.split(":"))
-        if not (0 <= hour <= 23 and 0 <= minute <= 59):
-            raise ValueError
+        hour, minute = map(int, context.args[0].strip().split(":"))
+        if not (0 <= hour <= 23 and 0 <= minute <= 59): raise ValueError
     except ValueError:
         await update.message.reply_text(t("remind_invalid_format", lang))
         return
@@ -874,164 +608,169 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(t("remind_not_linked", lang))
         return
 
-    prefs = await loop.run_in_executor(
-        None, lambda: get_notification_prefs_sync(uid)
-    )
-    prefs["reminderEnabled"] = True
-    prefs["reminderHour"]    = hour
-    prefs["reminderMinute"]  = minute
-    # Reset della deduplicazione quando l'utente cambia orario
-    prefs.pop("lastReminderSent", None)
-
-    await loop.run_in_executor(
-        None, lambda: save_notification_prefs_sync(uid, prefs)
-    )
+    prefs = await loop.run_in_executor(None, lambda: get_notification_prefs_sync(uid))
+    prefs.update({"reminderEnabled": True, "reminderHour": hour, "reminderMinute": minute})
+    prefs.pop("lastReminderSent", None)  # reset dedup when time changes
+    await loop.run_in_executor(None, lambda: save_notification_prefs_sync(uid, prefs))
     await update.message.reply_text(t("remind_set", lang, hour, minute))
 
 
 async def cmd_remindoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    loop    = asyncio.get_event_loop()
+    chat_id   = update.effective_chat.id
+    loop      = asyncio.get_event_loop()
     uid, lang = await get_lang(chat_id, loop)
 
     if not uid:
         await update.message.reply_text(t("not_linked", lang))
         return
 
-    prefs = await loop.run_in_executor(
-        None, lambda: get_notification_prefs_sync(uid)
-    )
+    prefs = await loop.run_in_executor(None, lambda: get_notification_prefs_sync(uid))
     prefs["reminderEnabled"] = False
-    await loop.run_in_executor(
-        None, lambda: save_notification_prefs_sync(uid, prefs)
-    )
+    await loop.run_in_executor(None, lambda: save_notification_prefs_sync(uid, prefs))
     await update.message.reply_text(t("remind_off", lang))
 
 
 async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    loop    = asyncio.get_event_loop()
+    chat_id   = update.effective_chat.id
+    loop      = asyncio.get_event_loop()
     uid, lang = await get_lang(chat_id, loop)
 
     if not uid:
         await update.message.reply_text(t("not_linked", lang))
         return
 
-    prefs = await loop.run_in_executor(
-        None, lambda: get_notification_prefs_sync(uid)
-    )
-
+    prefs = await loop.run_in_executor(None, lambda: get_notification_prefs_sync(uid))
     if prefs.get("reminderEnabled"):
-        h = prefs.get("reminderHour", 0)
-        m = prefs.get("reminderMinute", 0)
-        reminder_status = t("settings_reminder_active", lang, h, m)
+        rs = t("settings_reminder_active", lang, prefs.get("reminderHour",0), prefs.get("reminderMinute",0))
     else:
-        reminder_status = t("settings_reminder_off", lang)
+        rs = t("settings_reminder_off", lang)
 
-    inactivity = t("settings_active", lang) if not prefs.get("inactivityAlertDisabled") else t("settings_disabled", lang)
-    weekly     = t("settings_active", lang) if not prefs.get("weeklyReportDisabled") else t("settings_disabled", lang)
-
-    await update.message.reply_text(
-        t("settings", lang, reminder_status, inactivity, weekly, INACTIVITY_DAYS)
-    )
+    ia = t("settings_active" if not prefs.get("inactivityAlertDisabled") else "settings_disabled", lang)
+    wr = t("settings_active" if not prefs.get("weeklyReportDisabled") else "settings_disabled", lang)
+    await update.message.reply_text(t("settings", lang, rs, ia, wr, INACTIVITY_DAYS))
 
 
 async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    loop    = asyncio.get_event_loop()
-    _, lang = await get_lang(chat_id, loop)
+    chat_id   = update.effective_chat.id
+    loop      = asyncio.get_event_loop()
+    _, lang   = await get_lang(chat_id, loop)
     chat_histories[chat_id] = []
     await update.message.reply_text(t("reset_done", lang))
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    text    = update.message.text
-    loop    = asyncio.get_event_loop()
+    chat_id   = update.effective_chat.id
+    text      = update.message.text
+    loop      = asyncio.get_event_loop()
 
-    user_data = await loop.run_in_executor(
-        None, lambda: get_user_data_sync(chat_id)
-    )
-    uid = user_data.get("uid", "")
-    mood_data = await loop.run_in_executor(
-        None, lambda: get_mood_data_sync(uid)
-    ) if uid else []
+    user_data = await loop.run_in_executor(None, lambda: get_user_data_sync(chat_id))
+    uid       = user_data.get("uid","")
+    mood_data = await loop.run_in_executor(None, lambda: get_mood_data_sync(uid)) if uid else []
 
-    user_context = build_user_context(user_data, mood_data)
-    full_system  = SYSTEM_PROMPT + user_context
-
-    chat_histories[chat_id].append({"role": "user", "content": text})
+    full_system = SYSTEM_PROMPT + build_user_context(user_data, mood_data)
+    chat_histories[chat_id].append({"role":"user","content":text})
     if len(chat_histories[chat_id]) > 20:
         chat_histories[chat_id] = chat_histories[chat_id][-20:]
 
-    completion = groq_client.chat.completions.create(
-        model=MODEL,
-        messages=[{"role": "system", "content": full_system}] + chat_histories[chat_id],
-    )
-    reply = strip_markdown(completion.choices[0].message.content)
-    chat_histories[chat_id].append({"role": "assistant", "content": reply})
-    await update.message.reply_text(reply)
+    try:
+        c = groq_client.chat.completions.create(
+            model=MODEL,
+            messages=[{"role":"system","content":full_system}] + chat_histories[chat_id],
+        )
+        reply = strip_markdown(c.choices[0].message.content)
+        chat_histories[chat_id].append({"role":"assistant","content":reply})
+        await update.message.reply_text(reply)
+    except Exception as e:
+        logger.error(f"handle_message error: {e}")
+        await update.message.reply_text("⚠️ Qualcosa è andato storto. Riprova 🙏")
 
 
-# ─── Web ─────────────────────────────────────────────────────
-async def health(request):
+# ─── Web endpoints ────────────────────────────────────────────────────────────
+async def health_handler(request):
     return web.Response(text="OK")
 
-async def webhook(request, app):
+
+async def tick_handler(request, tg_app):
+    """
+    Called by UptimeRobot every 5 minutes via GET /tick.
+    Triggers daily reminders immediately — this ensures reminders
+    are sent even if Koyeb was sleeping when the scheduler fired.
+    """
+    asyncio.create_task(send_daily_reminders(tg_app))
+    return web.Response(text="tick OK")
+
+
+async def telegram_webhook_handler(request, tg_app):
     data   = await request.json()
-    update = Update.de_json(data, app.bot)
-    await app.process_update(update)
+    update = Update.de_json(data, tg_app.bot)
+    await tg_app.process_update(update)
     return web.Response(text="OK")
 
 
-# ─── Main ────────────────────────────────────────────────────
+def get_cors_headers(origin):
+    allowed = origin if origin in ALLOWED_ORIGINS else ALLOWED_ORIGINS[0]
+    return {
+        "Access-Control-Allow-Origin":  allowed,
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+    }
+
+
+async def chat_handler(request):
+    """Secure proxy for Bodhio.life web chat widget."""
+    origin = request.headers.get("Origin","")
+    cors   = get_cors_headers(origin)
+
+    if request.method == "OPTIONS":
+        return web.Response(status=204, headers=cors)
+
+    try:
+        body     = await request.json()
+        messages = body.get("messages", [])[-10:]
+
+        if not messages:
+            return web.Response(status=400, text=json.dumps({"error":"messages required"}), content_type="application/json", headers=cors)
+
+        full_messages = [{"role":"system","content":SYSTEM_PROMPT}] + messages
+        c = groq_client.chat.completions.create(model=MODEL, messages=full_messages, temperature=0.7, max_tokens=1024)
+        reply = strip_markdown(c.choices[0].message.content)
+
+        return web.Response(text=json.dumps({"reply":reply}), content_type="application/json", headers=cors)
+    except Exception as e:
+        logger.error(f"Web chat error: {e}")
+        return web.Response(status=500, text=json.dumps({"error":"Internal server error"}), content_type="application/json", headers=cors)
+
+
+# ─── Main ─────────────────────────────────────────────────────────────────────
 async def main():
-    tg_app = ApplicationBuilder().token(BOT_TOKEN).build()
+    tg_app = ApplicationBuilder().token(BOT_TOKEN).updater(None).build()
     tg_app.add_handler(CommandHandler("start",     cmd_start))
     tg_app.add_handler(CommandHandler("reset",     cmd_reset))
     tg_app.add_handler(CommandHandler("remind",    cmd_remind))
     tg_app.add_handler(CommandHandler("remindoff", cmd_remindoff))
     tg_app.add_handler(CommandHandler("settings",  cmd_settings))
-    tg_app.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
-    )
+    tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+    # Scheduler for inactivity alerts, weekly reports, post-session mood
     scheduler = AsyncIOScheduler(timezone="UTC")
-    scheduler.add_job(
-        send_daily_reminders,
-        CronTrigger(minute="*"),  # ogni minuto — ora/minuto/deduplicazione gestiti internamente
-        args=[tg_app],
-        id="daily_reminders",
-    )
-    scheduler.add_job(
-        send_inactivity_alerts,
-        CronTrigger(hour="*/6", minute=30),
-        args=[tg_app],
-        id="inactivity_alerts",
-    )
-    scheduler.add_job(
-        send_weekly_reports,
-        CronTrigger(day_of_week="mon", hour=9, minute=0),
-        args=[tg_app],
-        id="weekly_reports",
-    )
-    scheduler.add_job(
-        check_post_session_mood,
-        CronTrigger(minute="*/5"),
-        args=[tg_app],
-        id="post_session_mood",
-    )
+    scheduler.add_job(send_daily_reminders,   CronTrigger(minute="*"),                    args=[tg_app], id="daily_reminders")
+    scheduler.add_job(send_inactivity_alerts, CronTrigger(hour="*/6", minute=30),         args=[tg_app], id="inactivity_alerts")
+    scheduler.add_job(send_weekly_reports,    CronTrigger(day_of_week="mon",hour=9,minute=0), args=[tg_app], id="weekly_reports")
+    scheduler.add_job(check_post_session_mood,CronTrigger(minute="*/5"),                  args=[tg_app], id="post_session_mood")
     scheduler.start()
     logger.info("✅ Scheduler avviato")
 
     webhook_path = f"/webhook/{BOT_TOKEN}"
     web_app      = web.Application()
-    web_app.router.add_get("/",       health)
-    web_app.router.add_get("/health", health)
-    web_app.router.add_post(webhook_path, lambda r: webhook(r, tg_app))
+    web_app.router.add_get("/",            health_handler)
+    web_app.router.add_get("/health",      health_handler)
+    web_app.router.add_get("/tick",        lambda r: tick_handler(r, tg_app))
+    web_app.router.add_post(webhook_path,  lambda r: telegram_webhook_handler(r, tg_app))
+    web_app.router.add_post("/chat",       chat_handler)
+    web_app.router.add_route("OPTIONS", "/chat", chat_handler)
 
     await tg_app.initialize()
-    await tg_app.bot.set_webhook(f"{WEBHOOK_URL}{webhook_path}")
+    await tg_app.bot.set_webhook(f"{WEBHOOK_URL}{webhook_path}", drop_pending_updates=True)
     await tg_app.start()
 
     runner = web.AppRunner(web_app)
@@ -1039,7 +778,7 @@ async def main():
     site = web.TCPSite(runner, "0.0.0.0", PORT)
     await site.start()
 
-    logger.info("🚀 Bot avviato con notifiche attive")
+    logger.info("🚀 Bot avviato")
     await asyncio.Event().wait()
 
 
