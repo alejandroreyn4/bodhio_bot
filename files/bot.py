@@ -331,7 +331,7 @@ async def send_daily_reminders(tg_app):
     """
     FIX 1: awaited directly (no create_task) so it never gets dropped.
     FIX 2: skips users who already meditated today.
-    Uses 8-minute tolerance window + daily deduplication.
+    Uses 20-minute tolerance window + daily deduplication.
     """
     loop      = asyncio.get_event_loop()
     now_utc   = datetime.now(timezone.utc)
@@ -368,10 +368,10 @@ async def send_daily_reminders(tg_app):
         if int(prefs["reminderHour"]) != now_h:
             continue
 
-        # 8-minute tolerance window
+        # 20-minute tolerance window to cover UptimeRobot 5min interval + Koyeb wake-up delay
         target_m = int(prefs.get("reminderMinute", 0))
         diff = (now_m - target_m) % 60
-        if diff > 8:
+        if diff > 20:
             continue
 
         name     = user.get("displayName", "")
