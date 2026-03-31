@@ -239,7 +239,14 @@ def get_mood_data_sync(uid):
                 "sessionDuration": int(d.get("sessionDuration", 0)),
                 "note":            d.get("note"),
             })
-        result.sort(key=lambda x: x["date"] if x["date"] else "", reverse=True)
+        def safe_date_key(x):
+            d = x.get("date")
+            if d is None:
+                return ""
+            if hasattr(d, "strftime"):
+                return d.strftime("%Y-%m-%d %H:%M:%S")
+            return str(d)
+        result.sort(key=safe_date_key, reverse=True)
         return result[:10]
     except Exception as e:
         logger.error(f"get_mood: {e}"); return []
@@ -341,11 +348,6 @@ NEVER reveal numeric mood scores to the user.
 # ─── Notification jobs ────────────────────────────────────────────────────────
 
 async def send_daily_reminders(tg_app):
-    """
-    FIX 1: awaited directly (no create_task) so it never gets dropped.
-    FIX 2: skips users who already meditated today.
-    Uses 20-minute tolerance window + daily deduplication.
-    """
     loop      = asyncio.get_event_loop()
     now_utc   = datetime.now(timezone.utc)
     now_h     = now_utc.hour
@@ -355,42 +357,43 @@ async def send_daily_reminders(tg_app):
     logger.info(f"⏰ send_daily_reminders chiamato — {now_utc.strftime('%H:%M')} UTC")
 
     users = await loop.run_in_executor(None, get_all_telegram_users_sync)
+    logger.info(f"👥 Utenti Telegram trovati: {len(users)}")
+
     for user in users:
         chat_id = user.get("telegramChatId")
         uid     = user.get("uid")
+        name    = user.get("displayName", "?")
         if not chat_id or not uid:
             continue
 
         prefs = await loop.run_in_executor(None, lambda u=uid: get_notification_prefs_sync(u))
 
+        logger.info(f"🔍 {name}: enabled={prefs.get('reminderEnabled')}, hour={prefs.get('reminderHour')}, min={prefs.get('reminderMinute')}, lastSent={prefs.get('lastReminderSent')}, now={now_h}:{now_m:02d}")
+
         if not prefs.get("reminderEnabled", False):
+            logger.info(f"  ⏭️ {name}: reminder disabilitato")
             continue
         if prefs.get("reminderHour") is None:
+            logger.info(f"  ⏭️ {name}: ora non impostata")
             continue
-
-        # Deduplication: max 1 reminder per day
         if prefs.get("lastReminderSent") == today_str:
+            logger.info(f"  ⏭️ {name}: già inviato oggi")
             continue
-
-        # FIX: skip if user already meditated today
         if has_meditated_today_sync(user):
-            logger.info(f"⏭️ {chat_id} ha già meditato oggi, reminder saltato")
+            logger.info(f"  ⏭️ {name}: ha già meditato oggi")
             continue
-
-        # Check hour matches
         if int(prefs["reminderHour"]) != now_h:
+            logger.info(f"  ⏭️ {name}: ora {prefs['reminderHour']} != {now_h}")
             continue
 
-        # 20-minute tolerance window to cover UptimeRobot 5min interval + Koyeb wake-up delay
         target_m = int(prefs.get("reminderMinute", 0))
         diff = (now_m - target_m) % 60
         if diff > 20:
+            logger.info(f"  ⏭️ {name}: fuori finestra (diff={diff} min)")
             continue
 
-        name     = user.get("displayName", "")
         language = user.get("language", "it")
         streak   = int(user.get("streak", 0))
-
         logger.info(f"📬 Invio reminder a {chat_id} ({name})")
 
         prompt = (
