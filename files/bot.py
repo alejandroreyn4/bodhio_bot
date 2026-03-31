@@ -50,7 +50,8 @@ STRINGS = {
             "/reset — cancella cronologia chat\n"
             "/remind HH:MM — imposta reminder giornaliero (es. /remind 08:00)\n"
             "/remindoff — disattiva reminder giornaliero\n"
-            "/settings — mostra le tue preferenze notifiche"
+            "/settings — mostra le tue preferenze notifiche
+            "/notifiche off — disattiva TUTTE le notifiche\n""
         ),
         "en": lambda name: (
             f"Hi {name}! I'm Bodhi 🪷\n\n"
@@ -61,7 +62,8 @@ STRINGS = {
             "/reset — clear chat history\n"
             "/remind HH:MM — set daily reminder (e.g. /remind 08:00)\n"
             "/remindoff — disable daily reminder\n"
-            "/settings — show your notification preferences"
+            "/settings — show your notification preferences
+            "/notifiche off — disable ALL notifications\n""
         ),
         "es": lambda name: (
             f"¡Hola {name}! Soy Bodhi 🪷\n\n"
@@ -72,7 +74,8 @@ STRINGS = {
             "/reset — borrar historial del chat\n"
             "/remind HH:MM — configurar recordatorio diario (ej. /remind 08:00)\n"
             "/remindoff — desactivar recordatorio diario\n"
-            "/settings — ver tus preferencias de notificaciones"
+            "/settings — ver tus preferencias de notificaciones
+            "/notifiche off — desactivar TODAS las notificaciones\n""
         ),
     },
     "db_unavailable":     {"it": "⚠️ Database non disponibile.", "en": "⚠️ Database unavailable.", "es": "⚠️ Base de datos no disponible."},
@@ -108,6 +111,16 @@ STRINGS = {
     "settings_active":       {"it": "attivo",      "en": "active",   "es": "activo"},
     "settings_disabled":     {"it": "disattivato", "en": "disabled", "es": "desactivado"},
     "reset_done":            {"it": "🔄 Cronologia cancellata 🙏", "en": "🔄 History cleared 🙏", "es": "🔄 Historial borrado 🙏"},
+    "notifiche_off": {
+        "it": "🔕 Tutte le notifiche disattivate.\n\nPuoi riattivarle in qualsiasi momento con /remind HH:MM o scrivendo /settings.",
+        "en": "🔕 All notifications disabled.\n\nYou can re-enable them anytime with /remind HH:MM or /settings.",
+        "es": "🔕 Todas las notificaciones desactivadas.\n\nPuedes reactivarlas en cualquier momento con /remind HH:MM o /settings.",
+    },
+    "notifiche_already_off": {
+        "it": "ℹ️ Le notifiche sono già disattivate.",
+        "en": "ℹ️ Notifications are already disabled.",
+        "es": "ℹ️ Las notificaciones ya están desactivadas.",
+    },
 }
 
 def t(key, lang, *args):
@@ -418,9 +431,15 @@ async def send_inactivity_alerts(tg_app):
         if prefs.get("inactivityAlertDisabled", False):
             continue
 
-        # Deduplication: max 1 alert per day
-        if prefs.get("lastInactivitySent") == today_str:
-            continue
+        # Send max once every 3 days
+        last_sent = prefs.get("lastInactivitySent")
+        if last_sent:
+            try:
+                last_sent_date = datetime.strptime(last_sent, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                if (now - last_sent_date).days < 3:
+                    continue
+            except Exception:
+                pass
 
         # Skip if user already meditated today
         if has_meditated_today_sync(user):
@@ -677,6 +696,43 @@ async def cmd_remindoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(t("remind_off", lang))
 
 
+async def cmd_notifiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Disattiva TUTTE le notifiche con /notifiche off"""
+    chat_id   = update.effective_chat.id
+    loop      = asyncio.get_event_loop()
+    uid, lang = await get_lang(chat_id, loop)
+
+    args = context.args
+    if not args or args[0].lower() != "off":
+        await update.message.reply_text(
+            "Usa /notifiche off per disattivare tutte le notifiche." if lang == "it"
+            else "Use /notifiche off to disable all notifications."
+        )
+        return
+
+    if not uid:
+        await update.message.reply_text(t("not_linked", lang))
+        return
+
+    prefs = await loop.run_in_executor(None, lambda: get_notification_prefs_sync(uid))
+
+    # Check if already all off
+    already_off = (
+        not prefs.get("reminderEnabled", False) and
+        prefs.get("inactivityAlertDisabled", False) and
+        prefs.get("weeklyReportDisabled", False)
+    )
+    if already_off:
+        await update.message.reply_text(t("notifiche_already_off", lang))
+        return
+
+    prefs["reminderEnabled"]        = False
+    prefs["inactivityAlertDisabled"] = True
+    prefs["weeklyReportDisabled"]    = True
+    await loop.run_in_executor(None, lambda: save_notification_prefs_sync(uid, prefs))
+    await update.message.reply_text(t("notifiche_off", lang))
+
+
 async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id   = update.effective_chat.id
     loop      = asyncio.get_event_loop()
@@ -814,11 +870,12 @@ async def main():
     tg_app.add_handler(CommandHandler("remind",    cmd_remind))
     tg_app.add_handler(CommandHandler("remindoff", cmd_remindoff))
     tg_app.add_handler(CommandHandler("settings",  cmd_settings))
+    tg_app.add_handler(CommandHandler("notifiche", cmd_notifiche))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     scheduler = AsyncIOScheduler(timezone="UTC")
     scheduler.add_job(send_daily_reminders,    CronTrigger(minute="*"),                        args=[tg_app], id="daily_reminders")
-    scheduler.add_job(send_inactivity_alerts,  CronTrigger(hour="*/6", minute=30),             args=[tg_app], id="inactivity_alerts")
+    scheduler.add_job(send_inactivity_alerts,  CronTrigger(hour=10, minute=0),             args=[tg_app], id="inactivity_alerts")
     scheduler.add_job(send_weekly_reports,     CronTrigger(day_of_week="mon",hour=9,minute=0), args=[tg_app], id="weekly_reports")
     scheduler.add_job(check_post_session_mood, CronTrigger(minute="*/5"),                      args=[tg_app], id="post_session_mood")
     scheduler.start()
