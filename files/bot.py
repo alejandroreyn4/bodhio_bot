@@ -39,37 +39,6 @@ ALLOWED_ORIGINS = os.getenv(
     "https://bodhio.life,https://www.bodhio.life"
 ).split(",")
 
-# ─── Telegram suggestion block (per lingua) ───────────────────────────────────
-TELEGRAM_SUGGESTION = {
-    "it": (
-        "\n\nPosso accompagnarti anche fuori da qui 🪷\n"
-        "Su Telegram posso:\n"
-        "· ricordarti quando meditare 📅\n"
-        "· creare sessioni personalizzate\n"
-        "· mostrarti i tuoi progressi 📊\n\n"
-        "Vuoi continuare là?\n"
-        "👉 https://t.me/bodhio_life_bot"
-    ),
-    "en": (
-        "\n\nI can accompany you outside of here too 🪷\n"
-        "On Telegram I can:\n"
-        "· remind you when to meditate 📅\n"
-        "· create personalized sessions\n"
-        "· show you your progress 📊\n\n"
-        "Do you want to continue there?\n"
-        "👉 https://t.me/bodhio_life_bot"
-    ),
-    "es": (
-        "\n\nPuedo acompañarte también fuera de aquí 🪷\n"
-        "En Telegram puedo:\n"
-        "· recordarte cuándo meditar 📅\n"
-        "· crear sesiones personalizadas\n"
-        "· mostrarte tu progreso 📊\n\n"
-        "¿Quieres continuar allí?\n"
-        "👉 https://t.me/bodhio_life_bot"
-    ),
-}
-
 # ─── i18n ─────────────────────────────────────────────────────────────────────
 STRINGS = {
     "start_welcome": {
@@ -271,44 +240,6 @@ def get_utc_offset_hours(tz_name):
     except Exception:
         return 0
 
-# ─── Language detection ───────────────────────────────────────────────────────
-
-def detect_language(messages):
-    # Cerca lang esplicito passato dal frontend
-    for m in reversed(messages):
-        if isinstance(m, dict) and m.get("lang"):
-            l = m["lang"].lower()[:2]
-            if l in ("it", "en", "es"):
-                return l
-
-    # Guarda TUTTI i testi (utente + assistant) per la detection
-    all_texts = " ".join(
-        m.get("content", "") for m in messages
-    ).lower()
-
-    it_words = ["ciao", "come", "cosa", "sono", "grazie", "meditazione",
-                "aiuto", "oggi", "voglio", "sento", "bene", "bodhi", "pace",
-                "momento", "posso", "puoi", "stai", "sto", "qui", "per"]
-    es_words = ["hola", "como", "qué", "soy", "gracias", "meditación",
-                "ayuda", "hoy", "quiero", "siento", "bien", "todo", "puedo",
-                "momento", "paz", "calma", "estoy", "estar", "aquí", "para"]
-    en_words = ["hello", "hi", "how", "fine", "good", "great", "help",
-                "meditation", "today", "feel", "calm", "peace", "want",
-                "here", "can", "you", "are", "the", "and", "for"]
-
-    it_score = sum(1 for w in it_words if w in all_texts)
-    es_score = sum(1 for w in es_words if w in all_texts)
-    en_score = sum(1 for w in en_words if w in all_texts)
-
-    best = max(it_score, es_score, en_score)
-    if best == 0:
-        return "en"
-    if it_score == best:
-        return "it"
-    if es_score == best:
-        return "es"
-    return "en"
-
 # ─── Firebase ─────────────────────────────────────────────────────────────────
 try:
     firebase_key = os.environ.get("FIREBASE_KEY")
@@ -327,8 +258,13 @@ except Exception as e:
 groq_client    = Groq(api_key=GROQ_API_KEY)
 chat_histories = defaultdict(list)
 
-SYSTEM_PROMPT = """You are Bodhi 🪷, the official assistant of Bodhio.life — 
-a free meditation app with no subscriptions and no ads.
+SYSTEM_PROMPT = """You are Bodhi 🪷, the official assistant of Bodhio.life.
+
+WHAT IS BODHIO.LIFE:
+Bodhio.life is a FREE WEB PLATFORM for meditation and mindfulness — no subscriptions, no ads.
+IMPORTANT: Bodhio.life is a website only, NOT a mobile app. Never say it can be downloaded
+from the App Store, Google Play, or any store. Users access it by visiting bodhio.life in
+their browser.
 
 LANGUAGE RULE: Always reply in the same language the user writes to you.
 FORMATTING RULE: Never use Markdown. Plain text only.
@@ -339,10 +275,11 @@ MOOD SCALE (internal only — NEVER show numbers to user):
 1=Molto Stressato 2=Stressato 3=Neutro 4=Calmo 5=Molto Calmo
 
 IMPORTANT RULES:
-- Use [USER DATA] section for personalized responses.
-- Always refer to Bodhio.life for tracking.
-- Never mention other apps (Headspace, Calm, etc.).
+- Use [USER DATA] section for personalized responses when available.
+- Always refer users to bodhio.life to track their meditation progress.
+- Never mention other apps or platforms (Headspace, Calm, Insight Timer, etc.).
 - NEVER show numeric mood scores to users.
+- NEVER say Bodhio.life is an app that can be downloaded.
 - Keep responses concise and warm.
 """
 
@@ -1119,12 +1056,7 @@ def get_cors_headers(origin):
 
 
 async def chat_handler(request):
-    """
-    Proxy sicuro per il widget chat di Bodhio.life.
-    - Rileva la lingua dai messaggi utente o dal campo 'lang' opzionale.
-    - Al secondo messaggio (1 user message in history) aggiunge il blocco
-      di suggerimento Telegram nella lingua rilevata.
-    """
+    """Secure proxy for Bodhio.life web chat widget."""
     origin = request.headers.get("Origin","")
     cors   = get_cors_headers(origin)
 
@@ -1143,12 +1075,6 @@ async def chat_handler(request):
                 headers=cors,
             )
 
-        # Rileva lingua
-        lang = detect_language(messages)
-
-        # Conta quanti messaggi utente ci sono (per il trigger Telegram)
-        user_msg_count = sum(1 for m in messages if m.get("role") == "user")
-
         full_messages = [{"role":"system","content":SYSTEM_PROMPT}] + messages
         c = groq_client.chat.completions.create(
             model=MODEL,
@@ -1157,11 +1083,6 @@ async def chat_handler(request):
             max_tokens=1024,
         )
         reply = strip_markdown(c.choices[0].message.content)
-
-        # Al secondo messaggio dell'utente aggiungi il suggerimento Telegram
-        if user_msg_count == 1:
-            reply += TELEGRAM_SUGGESTION.get(lang, TELEGRAM_SUGGESTION["en"])
-
         return web.Response(
             text=json.dumps({"reply": reply}),
             content_type="application/json",
