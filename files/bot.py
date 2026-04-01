@@ -218,9 +218,6 @@ def get_all_telegram_users_sync():
         logger.error(f"get_all_users: {e}"); return []
 
 def get_mood_data_sync(uid):
-    """
-    FIX: reads from /users/{uid}/moods subcollection (new structure).
-    """
     if not db or not uid: return []
     try:
         docs = (
@@ -252,7 +249,6 @@ def get_mood_data_sync(uid):
         logger.error(f"get_mood: {e}"); return []
 
 def get_latest_session_sync(uid):
-    """Reads from /sessions root collection filtered by userId."""
     if not db or not uid: return None
     try:
         result = [
@@ -280,7 +276,6 @@ def get_notification_prefs_sync(uid):
         logger.error(f"get_prefs: {e}"); return {}
 
 def has_meditated_today_sync(user_data):
-    """Check if user already meditated today using dailyMinutes map."""
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     daily_minutes = user_data.get("dailyMinutes", {})
     today_min = int(user_data.get("todayMin", 0))
@@ -348,6 +343,16 @@ NEVER reveal numeric mood scores to the user.
 # ─── Notification jobs ────────────────────────────────────────────────────────
 
 async def send_daily_reminders(tg_app):
+    """
+    FIX: ordine dei check corretto.
+    1. reminder abilitato?
+    2. ora impostata?
+    3. ora corrente == ora impostata? (check principale — prima di tutto il resto)
+    4. finestra di 2 minuti (job ogni minuto)
+    5. già inviato oggi?
+    NON controlla has_meditated_today: il reminder è un promemoria mattutino,
+    va inviato indipendentemente da eventuali sessioni già fatte.
+    """
     loop      = asyncio.get_event_loop()
     now_utc   = datetime.now(timezone.utc)
     now_h     = now_utc.hour
@@ -368,28 +373,37 @@ async def send_daily_reminders(tg_app):
 
         prefs = await loop.run_in_executor(None, lambda u=uid: get_notification_prefs_sync(u))
 
-        logger.info(f"🔍 {name}: enabled={prefs.get('reminderEnabled')}, hour={prefs.get('reminderHour')}, min={prefs.get('reminderMinute')}, lastSent={prefs.get('lastReminderSent')}, now={now_h}:{now_m:02d}")
+        logger.info(
+            f"🔍 {name}: enabled={prefs.get('reminderEnabled')}, "
+            f"hour={prefs.get('reminderHour')}, min={prefs.get('reminderMinute')}, "
+            f"lastSent={prefs.get('lastReminderSent')}, now={now_h}:{now_m:02d}"
+        )
 
+        # 1. Reminder abilitato?
         if not prefs.get("reminderEnabled", False):
             logger.info(f"  ⏭️ {name}: reminder disabilitato")
             continue
+
+        # 2. Ora impostata?
         if prefs.get("reminderHour") is None:
             logger.info(f"  ⏭️ {name}: ora non impostata")
             continue
-        if prefs.get("lastReminderSent") == today_str:
-            logger.info(f"  ⏭️ {name}: già inviato oggi")
-            continue
-        if has_meditated_today_sync(user):
-            logger.info(f"  ⏭️ {name}: ha già meditato oggi")
-            continue
+
+        # 3. Ora corrente == ora impostata? (check principale)
         if int(prefs["reminderHour"]) != now_h:
             logger.info(f"  ⏭️ {name}: ora {prefs['reminderHour']} != {now_h}")
             continue
 
+        # 4. Finestra di 2 minuti (job ogni minuto, 2 min sono più che sufficienti)
         target_m = int(prefs.get("reminderMinute", 0))
         diff = (now_m - target_m) % 60
-        if diff > 20:
+        if diff > 2:
             logger.info(f"  ⏭️ {name}: fuori finestra (diff={diff} min)")
+            continue
+
+        # 5. Già inviato oggi?
+        if prefs.get("lastReminderSent") == today_str:
+            logger.info(f"  ⏭️ {name}: già inviato oggi")
             continue
 
         language = user.get("language", "it")
@@ -417,7 +431,7 @@ async def send_daily_reminders(tg_app):
 
 
 async def send_inactivity_alerts(tg_app):
-    """Max 1 alert per day per user."""
+    """Max 1 alert ogni 3 giorni per utente."""
     loop      = asyncio.get_event_loop()
     now       = datetime.now(timezone.utc)
     cutoff    = now - timedelta(days=INACTIVITY_DAYS)
@@ -434,7 +448,6 @@ async def send_inactivity_alerts(tg_app):
         if prefs.get("inactivityAlertDisabled", False):
             continue
 
-        # Send max once every 3 days
         last_sent = prefs.get("lastInactivitySent")
         if last_sent:
             try:
@@ -444,7 +457,6 @@ async def send_inactivity_alerts(tg_app):
             except Exception:
                 pass
 
-        # Skip if user already meditated today
         if has_meditated_today_sync(user):
             continue
 
@@ -599,11 +611,10 @@ async def check_post_session_mood(tg_app):
                 logger.error(f"Post-session error {chat_id}: {e}")
 
 
-# ─── Telegram handlers ────────────────────────────────────────────────────────
 async def send_stress_mood_alerts(tg_app):
     """
-    If user recorded mood 1 (Molto Stressato) or 2 (Stressato) today,
-    send a caring check-in message. Max once per day per user.
+    Se l'utente ha registrato umore 1 o 2 oggi,
+    invia un messaggio di supporto. Max 1 volta al giorno per utente.
     """
     loop      = asyncio.get_event_loop()
     now       = datetime.now(timezone.utc)
@@ -618,11 +629,9 @@ async def send_stress_mood_alerts(tg_app):
 
         prefs = await loop.run_in_executor(None, lambda u=uid: get_notification_prefs_sync(u))
 
-        # Skip if all notifications disabled
         if prefs.get("inactivityAlertDisabled", False):
             continue
 
-        # Deduplication: max 1 stress alert per day
         if prefs.get("lastStressAlertSent") == today_str:
             continue
 
@@ -630,7 +639,6 @@ async def send_stress_mood_alerts(tg_app):
         if not mood_data:
             continue
 
-        # Check if any mood today is stressed (1 or 2)
         stressed_today = False
         for m in mood_data:
             mood_date = m.get("date")
@@ -672,6 +680,8 @@ async def send_stress_mood_alerts(tg_app):
             except Exception as e:
                 logger.error(f"Stress alert error {chat_id}: {e}")
 
+
+# ─── Telegram handlers ────────────────────────────────────────────────────────
 
 async def get_lang(chat_id, loop):
     user_data = await loop.run_in_executor(None, lambda: get_user_data_sync(chat_id))
@@ -752,6 +762,7 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     prefs = await loop.run_in_executor(None, lambda: get_notification_prefs_sync(uid))
     prefs.update({"reminderEnabled": True, "reminderHour": hour, "reminderMinute": minute})
+    # Reset lastReminderSent so the reminder fires on the next matching time
     prefs.pop("lastReminderSent", None)
     await loop.run_in_executor(None, lambda: save_notification_prefs_sync(uid, prefs))
     await update.message.reply_text(t("remind_set", lang, hour, minute))
@@ -792,7 +803,6 @@ async def cmd_notifiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     prefs = await loop.run_in_executor(None, lambda: get_notification_prefs_sync(uid))
 
-    # Check if already all off
     already_off = (
         not prefs.get("reminderEnabled", False) and
         prefs.get("inactivityAlertDisabled", False) and
@@ -802,7 +812,7 @@ async def cmd_notifiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(t("notifiche_already_off", lang))
         return
 
-    prefs["reminderEnabled"]        = False
+    prefs["reminderEnabled"]         = False
     prefs["inactivityAlertDisabled"] = True
     prefs["weeklyReportDisabled"]    = True
     await loop.run_in_executor(None, lambda: save_notification_prefs_sync(uid, prefs))
@@ -870,11 +880,7 @@ async def health_handler(request):
 
 
 async def tick_handler(request, tg_app):
-    """
-    FIX: awaits send_daily_reminders directly instead of create_task.
-    Called by UptimeRobot every 5 minutes via GET /tick.
-    """
-    logger.info("🔔 /tick ricevuto da UptimeRobot")
+    logger.info("🔔 /tick ricevuto")
     await send_daily_reminders(tg_app)
     return web.Response(text="tick OK")
 
@@ -950,11 +956,11 @@ async def main():
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     scheduler = AsyncIOScheduler(timezone="UTC")
-    scheduler.add_job(send_daily_reminders,    CronTrigger(minute="*"),                        args=[tg_app], id="daily_reminders")
-    scheduler.add_job(send_inactivity_alerts,  CronTrigger(hour=10, minute=0),             args=[tg_app], id="inactivity_alerts")
-    scheduler.add_job(send_weekly_reports,     CronTrigger(day_of_week="mon",hour=9,minute=0), args=[tg_app], id="weekly_reports")
-    scheduler.add_job(check_post_session_mood, CronTrigger(minute="*/5"),                      args=[tg_app], id="post_session_mood")
-    scheduler.add_job(send_stress_mood_alerts, CronTrigger(minute="*/10"),                     args=[tg_app], id="stress_mood_alerts")
+    scheduler.add_job(send_daily_reminders,    CronTrigger(minute="*"),                            args=[tg_app], id="daily_reminders")
+    scheduler.add_job(send_inactivity_alerts,  CronTrigger(hour=10, minute=0),                    args=[tg_app], id="inactivity_alerts")
+    scheduler.add_job(send_weekly_reports,     CronTrigger(day_of_week="mon", hour=9, minute=0),   args=[tg_app], id="weekly_reports")
+    scheduler.add_job(check_post_session_mood, CronTrigger(minute="*/5"),                          args=[tg_app], id="post_session_mood")
+    scheduler.add_job(send_stress_mood_alerts, CronTrigger(minute="*/10"),                         args=[tg_app], id="stress_mood_alerts")
     scheduler.start()
     logger.info("✅ Scheduler avviato")
 
