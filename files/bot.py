@@ -39,6 +39,37 @@ ALLOWED_ORIGINS = os.getenv(
     "https://bodhio.life,https://www.bodhio.life"
 ).split(",")
 
+# ─── Telegram suggestion block (per lingua) ───────────────────────────────────
+TELEGRAM_SUGGESTION = {
+    "it": (
+        "\n\nPosso accompagnarti anche fuori da qui 🪷\n"
+        "Su Telegram posso:\n"
+        "· ricordarti quando meditare 📅\n"
+        "· creare sessioni personalizzate\n"
+        "· mostrarti i tuoi progressi 📊\n\n"
+        "Vuoi continuare là?\n"
+        "👉 https://t.me/bodhio_life_bot"
+    ),
+    "en": (
+        "\n\nI can accompany you outside of here too 🪷\n"
+        "On Telegram I can:\n"
+        "· remind you when to meditate 📅\n"
+        "· create personalized sessions\n"
+        "· show you your progress 📊\n\n"
+        "Do you want to continue there?\n"
+        "👉 https://t.me/bodhio_life_bot"
+    ),
+    "es": (
+        "\n\nPuedo acompañarte también fuera de aquí 🪷\n"
+        "En Telegram puedo:\n"
+        "· recordarte cuándo meditar 📅\n"
+        "· crear sesiones personalizadas\n"
+        "· mostrarte tu progreso 📊\n\n"
+        "¿Quieres continuar allí?\n"
+        "👉 https://t.me/bodhio_life_bot"
+    ),
+}
+
 # ─── i18n ─────────────────────────────────────────────────────────────────────
 STRINGS = {
     "start_welcome": {
@@ -91,8 +122,6 @@ STRINGS = {
         "es": "✅ ¡Cuenta vinculada!\n\n🪷 Ahora te enviaré recordatorios personalizados.\n\nPrimero configura tu zona horaria:\n/timezone America/Mexico_City\n\n¡Luego usa /remind HH:MM para tu recordatorio diario!",
     },
     "link_error": {"it": "⚠️ Errore durante il collegamento.", "en": "⚠️ Error during linking.", "es": "⚠️ Error durante la vinculación."},
-
-    # /timezone
     "timezone_usage": {
         "it": (
             "Usa: /timezone Continente/Città\n\n"
@@ -152,7 +181,6 @@ STRINGS = {
         "en": "⚠️ First set your timezone:\n/timezone America/New_York\n\n(or the city closest to you)",
         "es": "⚠️ Primero configura tu zona horaria:\n/timezone America/Mexico_City\n\n(o la ciudad más cercana a ti)",
     },
-
     "remind_usage":          {"it": "Scrivi:\n/remind HH:MM  (es. /remind 08:00)", "en": "Write:\n/remind HH:MM  (e.g. /remind 08:00)", "es": "Escribe:\n/remind HH:MM  (ej. /remind 08:00)"},
     "remind_invalid_format": {"it": "Formato non valido. Usa HH:MM, es. /remind 08:00", "en": "Invalid format. Use HH:MM, e.g. /remind 08:00", "es": "Formato inválido. Usa HH:MM, ej. /remind 08:00"},
     "remind_not_linked":     {"it": "Account non collegato. Usa prima il link da Bodhio.life.", "en": "Account not linked. Use the link from Bodhio.life first.", "es": "Cuenta no vinculada. Usa primero el enlace de Bodhio.life."},
@@ -229,25 +257,52 @@ def t(key, lang, *args):
 # ─── Timezone helpers ──────────────────────────────────────────────────────────
 
 def local_to_utc(hour, minute, tz_name):
-    """
-    Converte ora locale (HH:MM) in UTC usando il timezone tz_name.
-    Restituisce (hour_utc, minute_utc).
-    Solleva ZoneInfoNotFoundError se il timezone non è valido.
-    """
-    tz = ZoneInfo(tz_name)
+    tz        = ZoneInfo(tz_name)
     now_local = datetime.now(tz)
     dt_local  = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
     dt_utc    = dt_local.astimezone(timezone.utc)
     return dt_utc.hour, dt_utc.minute
 
 def get_utc_offset_hours(tz_name):
-    """Restituisce l'offset UTC corrente in ore (es. +2.0 per Europe/Rome in estate)."""
     try:
         tz  = ZoneInfo(tz_name)
         now = datetime.now(tz)
         return now.utcoffset().total_seconds() / 3600
     except Exception:
         return 0
+
+# ─── Language detection ───────────────────────────────────────────────────────
+
+def detect_language(messages):
+    """
+    Rileva la lingua dai messaggi utente.
+    Controlla prima se c'è un campo 'lang' esplicito, altrimenti
+    usa una detection semplice basata su parole chiave.
+    Fallback: 'en'.
+    """
+    # Cerca lang esplicito passato dal frontend
+    for m in reversed(messages):
+        if isinstance(m, dict) and m.get("lang"):
+            l = m["lang"].lower()[:2]
+            if l in ("it", "en", "es"):
+                return l
+
+    # Detection dai testi utente
+    user_texts = " ".join(
+        m.get("content", "") for m in messages if m.get("role") == "user"
+    ).lower()
+
+    it_words = ["ciao", "come", "cosa", "sono", "grazie", "meditazione", "aiuto", "oggi", "voglio", "sento"]
+    es_words = ["hola", "como", "qué", "soy", "gracias", "meditación", "ayuda", "hoy", "quiero", "siento"]
+
+    it_score = sum(1 for w in it_words if w in user_texts)
+    es_score = sum(1 for w in es_words if w in user_texts)
+
+    if it_score > es_score and it_score > 0:
+        return "it"
+    if es_score > it_score and es_score > 0:
+        return "es"
+    return "en"
 
 # ─── Firebase ─────────────────────────────────────────────────────────────────
 try:
@@ -393,7 +448,6 @@ def get_notification_prefs_sync(uid):
         logger.error(f"get_prefs: {e}"); return {}
 
 def save_timezone_sync(uid, tz_name):
-    """Salva il timezone in users/{uid}/timezone."""
     if not db or not uid: return
     try:
         db.collection("users").document(uid).set({"timezone": tz_name}, merge=True)
@@ -401,7 +455,6 @@ def save_timezone_sync(uid, tz_name):
         logger.error(f"save_timezone: {e}")
 
 def get_timezone_sync(uid):
-    """Legge il timezone da users/{uid}/timezone. Restituisce None se non impostato."""
     if not db or not uid: return None
     try:
         doc = db.collection("users").document(uid).get()
@@ -477,16 +530,6 @@ NEVER reveal numeric mood scores to the user.
 # ─── Notification jobs ────────────────────────────────────────────────────────
 
 async def send_daily_reminders(tg_app):
-    """
-    Invia il reminder giornaliero.
-    L'ora è salvata in UTC (convertita al momento del /remind).
-    Ordine check:
-      1. reminder abilitato?
-      2. ora UTC impostata?
-      3. ora UTC corrente == ora UTC salvata?
-      4. finestra 2 minuti
-      5. già inviato oggi?
-    """
     loop      = asyncio.get_event_loop()
     now_utc   = datetime.now(timezone.utc)
     now_h     = now_utc.hour
@@ -513,29 +556,21 @@ async def send_daily_reminders(tg_app):
             f"lastSent={prefs.get('lastReminderSent')}, now={now_h}:{now_m:02d} UTC"
         )
 
-        # 1. Reminder abilitato?
         if not prefs.get("reminderEnabled", False):
             logger.info(f"  ⏭️ {name}: reminder disabilitato")
             continue
-
-        # 2. Ora UTC impostata?
         if prefs.get("reminderHourUTC") is None:
-            logger.info(f"  ⏭️ {name}: ora UTC non impostata (usa /timezone poi /remind)")
+            logger.info(f"  ⏭️ {name}: ora UTC non impostata")
             continue
-
-        # 3. Ora corrente == ora UTC salvata?
         if int(prefs["reminderHourUTC"]) != now_h:
             logger.info(f"  ⏭️ {name}: ora UTC {prefs['reminderHourUTC']} != {now_h}")
             continue
 
-        # 4. Finestra di 2 minuti
         target_m = int(prefs.get("reminderMinuteUTC", 0))
         diff = (now_m - target_m) % 60
         if diff > 2:
             logger.info(f"  ⏭️ {name}: fuori finestra (diff={diff} min)")
             continue
-
-        # 5. Già inviato oggi?
         if prefs.get("lastReminderSent") == today_str:
             logger.info(f"  ⏭️ {name}: già inviato oggi")
             continue
@@ -565,7 +600,6 @@ async def send_daily_reminders(tg_app):
 
 
 async def send_inactivity_alerts(tg_app):
-    """Max 1 alert ogni 3 giorni per utente."""
     loop      = asyncio.get_event_loop()
     now       = datetime.now(timezone.utc)
     cutoff    = now - timedelta(days=INACTIVITY_DAYS)
@@ -746,7 +780,6 @@ async def check_post_session_mood(tg_app):
 
 
 async def send_stress_mood_alerts(tg_app):
-    """Max 1 stress alert al giorno per utente."""
     loop      = asyncio.get_event_loop()
     now       = datetime.now(timezone.utc)
     today_str = now.strftime("%Y-%m-%d")
@@ -869,26 +902,18 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /timezone Continente/Città
-    Valida e salva il timezone in Firebase. Usato da /remind per la conversione UTC.
-    """
     chat_id   = update.effective_chat.id
     loop      = asyncio.get_event_loop()
     uid, lang = await get_lang(chat_id, loop)
 
-    # Nessun argomento → mostra esempi
     if not context.args:
         await update.message.reply_text(t("timezone_usage", lang))
         return
-
     if not uid:
         await update.message.reply_text(t("not_linked", lang))
         return
 
     tz_name = context.args[0].strip()
-
-    # Valida
     try:
         ZoneInfo(tz_name)
     except ZoneInfoNotFoundError:
@@ -902,11 +927,6 @@ async def cmd_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /remind HH:MM
-    Richiede che l'utente abbia già impostato il timezone con /timezone.
-    Converte l'ora locale in UTC e salva entrambe in Firebase.
-    """
     chat_id   = update.effective_chat.id
     loop      = asyncio.get_event_loop()
     uid, lang = await get_lang(chat_id, loop)
@@ -927,13 +947,11 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(t("remind_not_linked", lang))
         return
 
-    # Controlla timezone salvato
     tz_name = await loop.run_in_executor(None, lambda: get_timezone_sync(uid))
     if not tz_name:
         await update.message.reply_text(t("timezone_not_set", lang))
         return
 
-    # Converti ora locale → UTC
     try:
         hour_utc, minute_utc = local_to_utc(hour, minute, tz_name)
     except ZoneInfoNotFoundError:
@@ -945,13 +963,13 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prefs = await loop.run_in_executor(None, lambda: get_notification_prefs_sync(uid))
     prefs.update({
         "reminderEnabled":   True,
-        "reminderHour":      hour,         # ora locale (per display in /settings)
+        "reminderHour":      hour,
         "reminderMinute":    minute,
-        "reminderHourUTC":   hour_utc,     # ora UTC (usata dal job scheduler)
+        "reminderHourUTC":   hour_utc,
         "reminderMinuteUTC": minute_utc,
         "reminderTimezone":  tz_name,
     })
-    prefs.pop("lastReminderSent", None)    # reset per attivare subito al prossimo match
+    prefs.pop("lastReminderSent", None)
     await loop.run_in_executor(None, lambda: save_notification_prefs_sync(uid, prefs))
     await update.message.reply_text(t("remind_set", lang, hour, minute, tz_name))
 
@@ -972,7 +990,6 @@ async def cmd_remindoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_notifiche(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Disattiva TUTTE le notifiche con /notifiche off"""
     chat_id   = update.effective_chat.id
     loop      = asyncio.get_event_loop()
     uid, lang = await get_lang(chat_id, loop)
@@ -1097,7 +1114,12 @@ def get_cors_headers(origin):
 
 
 async def chat_handler(request):
-    """Secure proxy for Bodhio.life web chat widget."""
+    """
+    Proxy sicuro per il widget chat di Bodhio.life.
+    - Rileva la lingua dai messaggi utente o dal campo 'lang' opzionale.
+    - Al secondo messaggio (1 user message in history) aggiunge il blocco
+      di suggerimento Telegram nella lingua rilevata.
+    """
     origin = request.headers.get("Origin","")
     cors   = get_cors_headers(origin)
 
@@ -1116,6 +1138,12 @@ async def chat_handler(request):
                 headers=cors,
             )
 
+        # Rileva lingua
+        lang = detect_language(messages)
+
+        # Conta quanti messaggi utente ci sono (per il trigger Telegram)
+        user_msg_count = sum(1 for m in messages if m.get("role") == "user")
+
         full_messages = [{"role":"system","content":SYSTEM_PROMPT}] + messages
         c = groq_client.chat.completions.create(
             model=MODEL,
@@ -1124,8 +1152,13 @@ async def chat_handler(request):
             max_tokens=1024,
         )
         reply = strip_markdown(c.choices[0].message.content)
+
+        # Al secondo messaggio dell'utente aggiungi il suggerimento Telegram
+        if user_msg_count == 1:
+            reply += TELEGRAM_SUGGESTION.get(lang, TELEGRAM_SUGGESTION["en"])
+
         return web.Response(
-            text=json.dumps({"reply":reply}),
+            text=json.dumps({"reply": reply}),
             content_type="application/json",
             headers=cors,
         )
