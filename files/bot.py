@@ -4,6 +4,7 @@ import json
 import logging
 import asyncio
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from collections import defaultdict
 from aiohttp import web
 from telegram import Update
@@ -48,6 +49,7 @@ STRINGS = {
             "Comandi:\n"
             "/start — mostra questo messaggio\n"
             "/reset — cancella cronologia chat\n"
+            "/timezone Continente/Città — imposta il tuo fuso orario (es. /timezone Europe/Rome)\n"
             "/remind HH:MM — imposta reminder giornaliero (es. /remind 08:00)\n"
             "/remindoff — disattiva reminder giornaliero\n"
             "/settings — mostra le tue preferenze notifiche\n"
@@ -60,6 +62,7 @@ STRINGS = {
             "Commands:\n"
             "/start — show this message\n"
             "/reset — clear chat history\n"
+            "/timezone Continent/City — set your timezone (e.g. /timezone America/New_York)\n"
             "/remind HH:MM — set daily reminder (e.g. /remind 08:00)\n"
             "/remindoff — disable daily reminder\n"
             "/settings — show your notification preferences\n"
@@ -72,6 +75,7 @@ STRINGS = {
             "Comandos:\n"
             "/start — mostrar este mensaje\n"
             "/reset — borrar historial del chat\n"
+            "/timezone Continente/Ciudad — configura tu zona horaria (ej. /timezone America/Mexico_City)\n"
             "/remind HH:MM — configurar recordatorio diario (ej. /remind 08:00)\n"
             "/remindoff — desactivar recordatorio diario\n"
             "/settings — ver tus preferencias de notificaciones\n"
@@ -82,30 +86,122 @@ STRINGS = {
     "token_not_found":    {"it": "❌ Token non trovato.", "en": "❌ Token not found.", "es": "❌ Token no encontrado."},
     "token_already_used": {"it": "⚠️ Token già utilizzato.", "en": "⚠️ Token already used.", "es": "⚠️ Token ya utilizado."},
     "account_linked": {
-        "it": "✅ Account collegato!\n\n🪷 Da ora ti invierò promemoria personalizzati.\n\nUsa /remind HH:MM per il reminder giornaliero!",
-        "en": "✅ Account linked!\n\n🪷 I'll now send you personalized reminders.\n\nUse /remind HH:MM to set your daily reminder!",
-        "es": "✅ ¡Cuenta vinculada!\n\n🪷 Ahora te enviaré recordatorios personalizados.\n\n¡Usa /remind HH:MM para configurar tu recordatorio diario!",
+        "it": "✅ Account collegato!\n\n🪷 Da ora ti invierò promemoria personalizzati.\n\nPrima imposta il tuo fuso orario:\n/timezone Europe/Rome\n\nPoi usa /remind HH:MM per il reminder giornaliero!",
+        "en": "✅ Account linked!\n\n🪷 I'll now send you personalized reminders.\n\nFirst set your timezone:\n/timezone America/New_York\n\nThen use /remind HH:MM to set your daily reminder!",
+        "es": "✅ ¡Cuenta vinculada!\n\n🪷 Ahora te enviaré recordatorios personalizados.\n\nPrimero configura tu zona horaria:\n/timezone America/Mexico_City\n\n¡Luego usa /remind HH:MM para tu recordatorio diario!",
     },
-    "link_error":            {"it": "⚠️ Errore durante il collegamento.", "en": "⚠️ Error during linking.", "es": "⚠️ Error durante la vinculación."},
+    "link_error": {"it": "⚠️ Errore durante il collegamento.", "en": "⚠️ Error during linking.", "es": "⚠️ Error durante la vinculación."},
+
+    # /timezone
+    "timezone_usage": {
+        "it": (
+            "Usa: /timezone Continente/Città\n\n"
+            "Esempi:\n"
+            "🇮🇹 /timezone Europe/Rome\n"
+            "🇬🇧 /timezone Europe/London\n"
+            "🇺🇸 /timezone America/New_York\n"
+            "🇲🇽 /timezone America/Mexico_City\n"
+            "🇧🇷 /timezone America/Sao_Paulo\n"
+            "🇦🇷 /timezone America/Argentina/Buenos_Aires\n"
+            "🇯🇵 /timezone Asia/Tokyo\n"
+            "🇮🇳 /timezone Asia/Kolkata\n"
+            "🇦🇺 /timezone Australia/Sydney\n\n"
+            "Lista completa: en.wikipedia.org/wiki/List_of_tz_database_time_zones"
+        ),
+        "en": (
+            "Use: /timezone Continent/City\n\n"
+            "Examples:\n"
+            "🇮🇹 /timezone Europe/Rome\n"
+            "🇬🇧 /timezone Europe/London\n"
+            "🇺🇸 /timezone America/New_York\n"
+            "🇲🇽 /timezone America/Mexico_City\n"
+            "🇧🇷 /timezone America/Sao_Paulo\n"
+            "🇦🇷 /timezone America/Argentina/Buenos_Aires\n"
+            "🇯🇵 /timezone Asia/Tokyo\n"
+            "🇮🇳 /timezone Asia/Kolkata\n"
+            "🇦🇺 /timezone Australia/Sydney\n\n"
+            "Full list: en.wikipedia.org/wiki/List_of_tz_database_time_zones"
+        ),
+        "es": (
+            "Usa: /timezone Continente/Ciudad\n\n"
+            "Ejemplos:\n"
+            "🇮🇹 /timezone Europe/Rome\n"
+            "🇬🇧 /timezone Europe/London\n"
+            "🇺🇸 /timezone America/New_York\n"
+            "🇲🇽 /timezone America/Mexico_City\n"
+            "🇧🇷 /timezone America/Sao_Paulo\n"
+            "🇦🇷 /timezone America/Argentina/Buenos_Aires\n"
+            "🇯🇵 /timezone Asia/Tokyo\n"
+            "🇮🇳 /timezone Asia/Kolkata\n"
+            "🇦🇺 /timezone Australia/Sydney\n\n"
+            "Lista completa: en.wikipedia.org/wiki/List_of_tz_database_time_zones"
+        ),
+    },
+    "timezone_invalid": {
+        "it": lambda tz: f"❌ Fuso orario non valido: {tz}\n\nUsa /timezone per vedere gli esempi.",
+        "en": lambda tz: f"❌ Invalid timezone: {tz}\n\nUse /timezone to see examples.",
+        "es": lambda tz: f"❌ Zona horaria no válida: {tz}\n\nUsa /timezone para ver ejemplos.",
+    },
+    "timezone_set": {
+        "it": lambda tz, offset: f"✅ Fuso orario impostato: {tz} (UTC{offset:+.0f}h) 🌍\n\nOra puoi usare /remind HH:MM con la tua ora locale!",
+        "en": lambda tz, offset: f"✅ Timezone set: {tz} (UTC{offset:+.0f}h) 🌍\n\nNow you can use /remind HH:MM with your local time!",
+        "es": lambda tz, offset: f"✅ Zona horaria configurada: {tz} (UTC{offset:+.0f}h) 🌍\n\n¡Ahora puedes usar /remind HH:MM con tu hora local!",
+    },
+    "timezone_not_set": {
+        "it": "⚠️ Prima imposta il tuo fuso orario:\n/timezone Europe/Rome\n\n(oppure la città più vicina a te)",
+        "en": "⚠️ First set your timezone:\n/timezone America/New_York\n\n(or the city closest to you)",
+        "es": "⚠️ Primero configura tu zona horaria:\n/timezone America/Mexico_City\n\n(o la ciudad más cercana a ti)",
+    },
+
     "remind_usage":          {"it": "Scrivi:\n/remind HH:MM  (es. /remind 08:00)", "en": "Write:\n/remind HH:MM  (e.g. /remind 08:00)", "es": "Escribe:\n/remind HH:MM  (ej. /remind 08:00)"},
     "remind_invalid_format": {"it": "Formato non valido. Usa HH:MM, es. /remind 08:00", "en": "Invalid format. Use HH:MM, e.g. /remind 08:00", "es": "Formato inválido. Usa HH:MM, ej. /remind 08:00"},
     "remind_not_linked":     {"it": "Account non collegato. Usa prima il link da Bodhio.life.", "en": "Account not linked. Use the link from Bodhio.life first.", "es": "Cuenta no vinculada. Usa primero el enlace de Bodhio.life."},
     "remind_set": {
-        "it": lambda h, m: f"✅ Reminder impostato ogni giorno alle {h:02d}:{m:02d} UTC 🪷\nUsa /remindoff per disattivarlo.",
-        "en": lambda h, m: f"✅ Reminder set every day at {h:02d}:{m:02d} UTC 🪷\nUse /remindoff to disable it.",
-        "es": lambda h, m: f"✅ Recordatorio configurado cada día a las {h:02d}:{m:02d} UTC 🪷\nUsa /remindoff para desactivarlo.",
+        "it": lambda h, m, tz: f"✅ Reminder impostato ogni giorno alle {h:02d}:{m:02d} ({tz}) 🪷\nUsa /remindoff per disattivarlo.",
+        "en": lambda h, m, tz: f"✅ Reminder set every day at {h:02d}:{m:02d} ({tz}) 🪷\nUse /remindoff to disable it.",
+        "es": lambda h, m, tz: f"✅ Recordatorio configurado cada día a las {h:02d}:{m:02d} ({tz}) 🪷\nUsa /remindoff para desactivarlo.",
     },
     "remind_off":   {"it": "🔕 Reminder giornaliero disattivato.", "en": "🔕 Daily reminder disabled.", "es": "🔕 Recordatorio diario desactivado."},
     "not_linked":   {"it": "Account non collegato.", "en": "Account not linked.", "es": "Cuenta no vinculada."},
     "settings": {
-        "it": lambda rs, ia, wr, days: f"Le tue preferenze notifiche:\n\n📅 Reminder giornaliero: {rs}\n💤 Alert inattività ({days}gg): {ia}\n📊 Report settimanale: {wr}\n\nComandi:\n/remind HH:MM — imposta reminder\n/remindoff — disattiva reminder",
-        "en": lambda rs, ia, wr, days: f"Your notification settings:\n\n📅 Daily reminder: {rs}\n💤 Inactivity alert ({days}d): {ia}\n📊 Weekly report: {wr}\n\nCommands:\n/remind HH:MM — set reminder\n/remindoff — disable reminder",
-        "es": lambda rs, ia, wr, days: f"Tus preferencias:\n\n📅 Recordatorio diario: {rs}\n💤 Alerta inactividad ({days}d): {ia}\n📊 Informe semanal: {wr}\n\nComandos:\n/remind HH:MM — configurar\n/remindoff — desactivar",
+        "it": lambda rs, ia, wr, days, tz: (
+            f"Le tue preferenze notifiche:\n\n"
+            f"🌍 Fuso orario: {tz}\n"
+            f"📅 Reminder giornaliero: {rs}\n"
+            f"💤 Alert inattività ({days}gg): {ia}\n"
+            f"📊 Report settimanale: {wr}\n\n"
+            f"Comandi:\n"
+            f"/timezone Continente/Città — cambia fuso orario\n"
+            f"/remind HH:MM — imposta reminder\n"
+            f"/remindoff — disattiva reminder"
+        ),
+        "en": lambda rs, ia, wr, days, tz: (
+            f"Your notification settings:\n\n"
+            f"🌍 Timezone: {tz}\n"
+            f"📅 Daily reminder: {rs}\n"
+            f"💤 Inactivity alert ({days}d): {ia}\n"
+            f"📊 Weekly report: {wr}\n\n"
+            f"Commands:\n"
+            f"/timezone Continent/City — change timezone\n"
+            f"/remind HH:MM — set reminder\n"
+            f"/remindoff — disable reminder"
+        ),
+        "es": lambda rs, ia, wr, days, tz: (
+            f"Tus preferencias:\n\n"
+            f"🌍 Zona horaria: {tz}\n"
+            f"📅 Recordatorio diario: {rs}\n"
+            f"💤 Alerta inactividad ({days}d): {ia}\n"
+            f"📊 Informe semanal: {wr}\n\n"
+            f"Comandos:\n"
+            f"/timezone Continente/Ciudad — cambiar zona horaria\n"
+            f"/remind HH:MM — configurar\n"
+            f"/remindoff — desactivar"
+        ),
     },
     "settings_reminder_active": {
-        "it": lambda h, m: f"attivo alle {h:02d}:{m:02d} UTC",
-        "en": lambda h, m: f"active at {h:02d}:{m:02d} UTC",
-        "es": lambda h, m: f"activo a las {h:02d}:{m:02d} UTC",
+        "it": lambda h, m: f"attivo alle {h:02d}:{m:02d} (ora locale)",
+        "en": lambda h, m: f"active at {h:02d}:{m:02d} (local time)",
+        "es": lambda h, m: f"activo a las {h:02d}:{m:02d} (hora local)",
     },
     "settings_reminder_off": {"it": "disattivato", "en": "disabled", "es": "desactivado"},
     "settings_active":       {"it": "attivo",      "en": "active",   "es": "activo"},
@@ -129,6 +225,29 @@ def t(key, lang, *args):
     if callable(value):
         return value(*args)
     return value
+
+# ─── Timezone helpers ──────────────────────────────────────────────────────────
+
+def local_to_utc(hour, minute, tz_name):
+    """
+    Converte ora locale (HH:MM) in UTC usando il timezone tz_name.
+    Restituisce (hour_utc, minute_utc).
+    Solleva ZoneInfoNotFoundError se il timezone non è valido.
+    """
+    tz = ZoneInfo(tz_name)
+    now_local = datetime.now(tz)
+    dt_local  = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    dt_utc    = dt_local.astimezone(timezone.utc)
+    return dt_utc.hour, dt_utc.minute
+
+def get_utc_offset_hours(tz_name):
+    """Restituisce l'offset UTC corrente in ore (es. +2.0 per Europe/Rome in estate)."""
+    try:
+        tz  = ZoneInfo(tz_name)
+        now = datetime.now(tz)
+        return now.utcoffset().total_seconds() / 3600
+    except Exception:
+        return 0
 
 # ─── Firebase ─────────────────────────────────────────────────────────────────
 try:
@@ -238,10 +357,8 @@ def get_mood_data_sync(uid):
             })
         def safe_date_key(x):
             d = x.get("date")
-            if d is None:
-                return ""
-            if hasattr(d, "strftime"):
-                return d.strftime("%Y-%m-%d %H:%M:%S")
+            if d is None: return ""
+            if hasattr(d, "strftime"): return d.strftime("%Y-%m-%d %H:%M:%S")
             return str(d)
         result.sort(key=safe_date_key, reverse=True)
         return result[:10]
@@ -275,26 +392,43 @@ def get_notification_prefs_sync(uid):
     except Exception as e:
         logger.error(f"get_prefs: {e}"); return {}
 
+def save_timezone_sync(uid, tz_name):
+    """Salva il timezone in users/{uid}/timezone."""
+    if not db or not uid: return
+    try:
+        db.collection("users").document(uid).set({"timezone": tz_name}, merge=True)
+    except Exception as e:
+        logger.error(f"save_timezone: {e}")
+
+def get_timezone_sync(uid):
+    """Legge il timezone da users/{uid}/timezone. Restituisce None se non impostato."""
+    if not db or not uid: return None
+    try:
+        doc = db.collection("users").document(uid).get()
+        return doc.to_dict().get("timezone") if doc.exists else None
+    except Exception as e:
+        logger.error(f"get_timezone: {e}"); return None
+
 def has_meditated_today_sync(user_data):
-    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today_str     = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     daily_minutes = user_data.get("dailyMinutes", {})
-    today_min = int(user_data.get("todayMin", 0))
+    today_min     = int(user_data.get("todayMin", 0))
     return today_min > 0 or int(daily_minutes.get(today_str, 0)) > 0
 
 def build_user_context(user_data, mood_data):
     if not user_data: return ""
-    name          = user_data.get("displayName","")
-    today_min     = int(user_data.get("todayMin",0))
-    total_min     = int(user_data.get("totalMinutes",0))
-    streak        = int(user_data.get("streak",0))
-    sessions      = int(user_data.get("sessions",0))
-    daily_goal    = int(user_data.get("dailyGoal",0))
-    max_session   = int(user_data.get("maxSessionDuration",0))
-    is_donator    = user_data.get("isDonator",False)
-    donation_tier = user_data.get("donationTier","")
+    name            = user_data.get("displayName","")
+    today_min       = int(user_data.get("todayMin",0))
+    total_min       = int(user_data.get("totalMinutes",0))
+    streak          = int(user_data.get("streak",0))
+    sessions        = int(user_data.get("sessions",0))
+    daily_goal      = int(user_data.get("dailyGoal",0))
+    max_session     = int(user_data.get("maxSessionDuration",0))
+    is_donator      = user_data.get("isDonator",False)
+    donation_tier   = user_data.get("donationTier","")
     unlocked_badges = user_data.get("unlockedBadges",[])
-    language      = user_data.get("language","it")
-    daily_minutes = user_data.get("dailyMinutes",{})
+    language        = user_data.get("language","it")
+    daily_minutes   = user_data.get("dailyMinutes",{})
 
     daily_history = ""
     if daily_minutes:
@@ -344,14 +478,14 @@ NEVER reveal numeric mood scores to the user.
 
 async def send_daily_reminders(tg_app):
     """
-    FIX: ordine dei check corretto.
-    1. reminder abilitato?
-    2. ora impostata?
-    3. ora corrente == ora impostata? (check principale — prima di tutto il resto)
-    4. finestra di 2 minuti (job ogni minuto)
-    5. già inviato oggi?
-    NON controlla has_meditated_today: il reminder è un promemoria mattutino,
-    va inviato indipendentemente da eventuali sessioni già fatte.
+    Invia il reminder giornaliero.
+    L'ora è salvata in UTC (convertita al momento del /remind).
+    Ordine check:
+      1. reminder abilitato?
+      2. ora UTC impostata?
+      3. ora UTC corrente == ora UTC salvata?
+      4. finestra 2 minuti
+      5. già inviato oggi?
     """
     loop      = asyncio.get_event_loop()
     now_utc   = datetime.now(timezone.utc)
@@ -375,8 +509,8 @@ async def send_daily_reminders(tg_app):
 
         logger.info(
             f"🔍 {name}: enabled={prefs.get('reminderEnabled')}, "
-            f"hour={prefs.get('reminderHour')}, min={prefs.get('reminderMinute')}, "
-            f"lastSent={prefs.get('lastReminderSent')}, now={now_h}:{now_m:02d}"
+            f"hour_utc={prefs.get('reminderHourUTC')}, min_utc={prefs.get('reminderMinuteUTC')}, "
+            f"lastSent={prefs.get('lastReminderSent')}, now={now_h}:{now_m:02d} UTC"
         )
 
         # 1. Reminder abilitato?
@@ -384,18 +518,18 @@ async def send_daily_reminders(tg_app):
             logger.info(f"  ⏭️ {name}: reminder disabilitato")
             continue
 
-        # 2. Ora impostata?
-        if prefs.get("reminderHour") is None:
-            logger.info(f"  ⏭️ {name}: ora non impostata")
+        # 2. Ora UTC impostata?
+        if prefs.get("reminderHourUTC") is None:
+            logger.info(f"  ⏭️ {name}: ora UTC non impostata (usa /timezone poi /remind)")
             continue
 
-        # 3. Ora corrente == ora impostata? (check principale)
-        if int(prefs["reminderHour"]) != now_h:
-            logger.info(f"  ⏭️ {name}: ora {prefs['reminderHour']} != {now_h}")
+        # 3. Ora corrente == ora UTC salvata?
+        if int(prefs["reminderHourUTC"]) != now_h:
+            logger.info(f"  ⏭️ {name}: ora UTC {prefs['reminderHourUTC']} != {now_h}")
             continue
 
-        # 4. Finestra di 2 minuti (job ogni minuto, 2 min sono più che sufficienti)
-        target_m = int(prefs.get("reminderMinute", 0))
+        # 4. Finestra di 2 minuti
+        target_m = int(prefs.get("reminderMinuteUTC", 0))
         diff = (now_m - target_m) % 60
         if diff > 2:
             logger.info(f"  ⏭️ {name}: fuori finestra (diff={diff} min)")
@@ -612,10 +746,7 @@ async def check_post_session_mood(tg_app):
 
 
 async def send_stress_mood_alerts(tg_app):
-    """
-    Se l'utente ha registrato umore 1 o 2 oggi,
-    invia un messaggio di supporto. Max 1 volta al giorno per utente.
-    """
+    """Max 1 stress alert al giorno per utente."""
     loop      = asyncio.get_event_loop()
     now       = datetime.now(timezone.utc)
     today_str = now.strftime("%Y-%m-%d")
@@ -628,10 +759,8 @@ async def send_stress_mood_alerts(tg_app):
             continue
 
         prefs = await loop.run_in_executor(None, lambda u=uid: get_notification_prefs_sync(u))
-
         if prefs.get("inactivityAlertDisabled", False):
             continue
-
         if prefs.get("lastStressAlertSent") == today_str:
             continue
 
@@ -646,8 +775,7 @@ async def send_stress_mood_alerts(tg_app):
                 continue
             try:
                 md = mood_date.replace(tzinfo=timezone.utc) if mood_date.tzinfo is None else mood_date
-                date_str = md.strftime("%Y-%m-%d")
-                if date_str == today_str and m.get("moodLevel", 0) <= 2:
+                if md.strftime("%Y-%m-%d") == today_str and m.get("moodLevel", 0) <= 2:
                     stressed_today = True
                     break
             except:
@@ -740,7 +868,45 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(t("link_error", lang))
 
 
+async def cmd_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /timezone Continente/Città
+    Valida e salva il timezone in Firebase. Usato da /remind per la conversione UTC.
+    """
+    chat_id   = update.effective_chat.id
+    loop      = asyncio.get_event_loop()
+    uid, lang = await get_lang(chat_id, loop)
+
+    # Nessun argomento → mostra esempi
+    if not context.args:
+        await update.message.reply_text(t("timezone_usage", lang))
+        return
+
+    if not uid:
+        await update.message.reply_text(t("not_linked", lang))
+        return
+
+    tz_name = context.args[0].strip()
+
+    # Valida
+    try:
+        ZoneInfo(tz_name)
+    except ZoneInfoNotFoundError:
+        await update.message.reply_text(t("timezone_invalid", lang, tz_name))
+        return
+
+    offset = get_utc_offset_hours(tz_name)
+    await loop.run_in_executor(None, lambda: save_timezone_sync(uid, tz_name))
+    logger.info(f"🌍 Timezone impostato per {uid}: {tz_name} (UTC{offset:+.0f}h)")
+    await update.message.reply_text(t("timezone_set", lang, tz_name, offset))
+
+
 async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /remind HH:MM
+    Richiede che l'utente abbia già impostato il timezone con /timezone.
+    Converte l'ora locale in UTC e salva entrambe in Firebase.
+    """
     chat_id   = update.effective_chat.id
     loop      = asyncio.get_event_loop()
     uid, lang = await get_lang(chat_id, loop)
@@ -751,7 +917,8 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         hour, minute = map(int, context.args[0].strip().split(":"))
-        if not (0 <= hour <= 23 and 0 <= minute <= 59): raise ValueError
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError
     except ValueError:
         await update.message.reply_text(t("remind_invalid_format", lang))
         return
@@ -760,12 +927,33 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(t("remind_not_linked", lang))
         return
 
+    # Controlla timezone salvato
+    tz_name = await loop.run_in_executor(None, lambda: get_timezone_sync(uid))
+    if not tz_name:
+        await update.message.reply_text(t("timezone_not_set", lang))
+        return
+
+    # Converti ora locale → UTC
+    try:
+        hour_utc, minute_utc = local_to_utc(hour, minute, tz_name)
+    except ZoneInfoNotFoundError:
+        await update.message.reply_text(t("timezone_invalid", lang, tz_name))
+        return
+
+    logger.info(f"🕐 {uid}: {hour:02d}:{minute:02d} {tz_name} → {hour_utc:02d}:{minute_utc:02d} UTC")
+
     prefs = await loop.run_in_executor(None, lambda: get_notification_prefs_sync(uid))
-    prefs.update({"reminderEnabled": True, "reminderHour": hour, "reminderMinute": minute})
-    # Reset lastReminderSent so the reminder fires on the next matching time
-    prefs.pop("lastReminderSent", None)
+    prefs.update({
+        "reminderEnabled":   True,
+        "reminderHour":      hour,         # ora locale (per display in /settings)
+        "reminderMinute":    minute,
+        "reminderHourUTC":   hour_utc,     # ora UTC (usata dal job scheduler)
+        "reminderMinuteUTC": minute_utc,
+        "reminderTimezone":  tz_name,
+    })
+    prefs.pop("lastReminderSent", None)    # reset per attivare subito al prossimo match
     await loop.run_in_executor(None, lambda: save_notification_prefs_sync(uid, prefs))
-    await update.message.reply_text(t("remind_set", lang, hour, minute))
+    await update.message.reply_text(t("remind_set", lang, hour, minute, tz_name))
 
 
 async def cmd_remindoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -828,15 +1016,22 @@ async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(t("not_linked", lang))
         return
 
-    prefs = await loop.run_in_executor(None, lambda: get_notification_prefs_sync(uid))
+    prefs      = await loop.run_in_executor(None, lambda: get_notification_prefs_sync(uid))
+    tz_name    = await loop.run_in_executor(None, lambda: get_timezone_sync(uid))
+    tz_display = tz_name if tz_name else (
+        "non impostato" if lang == "it" else ("not set" if lang == "en" else "no configurado")
+    )
+
     if prefs.get("reminderEnabled"):
-        rs = t("settings_reminder_active", lang, prefs.get("reminderHour",0), prefs.get("reminderMinute",0))
+        rs = t("settings_reminder_active", lang,
+               prefs.get("reminderHour", 0),
+               prefs.get("reminderMinute", 0))
     else:
         rs = t("settings_reminder_off", lang)
 
     ia = t("settings_active" if not prefs.get("inactivityAlertDisabled") else "settings_disabled", lang)
     wr = t("settings_active" if not prefs.get("weeklyReportDisabled") else "settings_disabled", lang)
-    await update.message.reply_text(t("settings", lang, rs, ia, wr, INACTIVITY_DAYS))
+    await update.message.reply_text(t("settings", lang, rs, ia, wr, INACTIVITY_DAYS, tz_display))
 
 
 async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -949,6 +1144,7 @@ async def main():
     tg_app = ApplicationBuilder().token(BOT_TOKEN).updater(None).build()
     tg_app.add_handler(CommandHandler("start",     cmd_start))
     tg_app.add_handler(CommandHandler("reset",     cmd_reset))
+    tg_app.add_handler(CommandHandler("timezone",  cmd_timezone))
     tg_app.add_handler(CommandHandler("remind",    cmd_remind))
     tg_app.add_handler(CommandHandler("remindoff", cmd_remindoff))
     tg_app.add_handler(CommandHandler("settings",  cmd_settings))
@@ -956,11 +1152,11 @@ async def main():
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     scheduler = AsyncIOScheduler(timezone="UTC")
-    scheduler.add_job(send_daily_reminders,    CronTrigger(minute="*"),                            args=[tg_app], id="daily_reminders")
-    scheduler.add_job(send_inactivity_alerts,  CronTrigger(hour=10, minute=0),                    args=[tg_app], id="inactivity_alerts")
-    scheduler.add_job(send_weekly_reports,     CronTrigger(day_of_week="mon", hour=9, minute=0),   args=[tg_app], id="weekly_reports")
-    scheduler.add_job(check_post_session_mood, CronTrigger(minute="*/5"),                          args=[tg_app], id="post_session_mood")
-    scheduler.add_job(send_stress_mood_alerts, CronTrigger(minute="*/10"),                         args=[tg_app], id="stress_mood_alerts")
+    scheduler.add_job(send_daily_reminders,    CronTrigger(minute="*"),                           args=[tg_app], id="daily_reminders")
+    scheduler.add_job(send_inactivity_alerts,  CronTrigger(hour=10, minute=0),                   args=[tg_app], id="inactivity_alerts")
+    scheduler.add_job(send_weekly_reports,     CronTrigger(day_of_week="mon", hour=9, minute=0),  args=[tg_app], id="weekly_reports")
+    scheduler.add_job(check_post_session_mood, CronTrigger(minute="*/5"),                         args=[tg_app], id="post_session_mood")
+    scheduler.add_job(send_stress_mood_alerts, CronTrigger(minute="*/10"),                        args=[tg_app], id="stress_mood_alerts")
     scheduler.start()
     logger.info("✅ Scheduler avviato")
 
