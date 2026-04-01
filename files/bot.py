@@ -274,12 +274,6 @@ def get_utc_offset_hours(tz_name):
 # ─── Language detection ───────────────────────────────────────────────────────
 
 def detect_language(messages):
-    """
-    Rileva la lingua dai messaggi utente.
-    Controlla prima se c'è un campo 'lang' esplicito, altrimenti
-    usa una detection semplice basata su parole chiave.
-    Fallback: 'en'.
-    """
     # Cerca lang esplicito passato dal frontend
     for m in reversed(messages):
         if isinstance(m, dict) and m.get("lang"):
@@ -287,20 +281,31 @@ def detect_language(messages):
             if l in ("it", "en", "es"):
                 return l
 
-    # Detection dai testi utente
-    user_texts = " ".join(
-        m.get("content", "") for m in messages if m.get("role") == "user"
+    # Guarda TUTTI i testi (utente + assistant) per la detection
+    all_texts = " ".join(
+        m.get("content", "") for m in messages
     ).lower()
 
-    it_words = ["ciao", "come", "cosa", "sono", "grazie", "meditazione", "aiuto", "oggi", "voglio", "sento"]
-    es_words = ["hola", "como", "qué", "soy", "gracias", "meditación", "ayuda", "hoy", "quiero", "siento"]
+    it_words = ["ciao", "come", "cosa", "sono", "grazie", "meditazione",
+                "aiuto", "oggi", "voglio", "sento", "bene", "bodhi", "pace",
+                "momento", "posso", "puoi", "stai", "sto", "qui", "per"]
+    es_words = ["hola", "como", "qué", "soy", "gracias", "meditación",
+                "ayuda", "hoy", "quiero", "siento", "bien", "todo", "puedo",
+                "momento", "paz", "calma", "estoy", "estar", "aquí", "para"]
+    en_words = ["hello", "hi", "how", "fine", "good", "great", "help",
+                "meditation", "today", "feel", "calm", "peace", "want",
+                "here", "can", "you", "are", "the", "and", "for"]
 
-    it_score = sum(1 for w in it_words if w in user_texts)
-    es_score = sum(1 for w in es_words if w in user_texts)
+    it_score = sum(1 for w in it_words if w in all_texts)
+    es_score = sum(1 for w in es_words if w in all_texts)
+    en_score = sum(1 for w in en_words if w in all_texts)
 
-    if it_score > es_score and it_score > 0:
+    best = max(it_score, es_score, en_score)
+    if best == 0:
+        return "en"
+    if it_score == best:
         return "it"
-    if es_score > it_score and es_score > 0:
+    if es_score == best:
         return "es"
     return "en"
 
