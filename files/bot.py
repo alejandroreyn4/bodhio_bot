@@ -722,6 +722,12 @@ async def check_post_session_mood(tg_app):
 
 
 async def send_stress_mood_alerts(tg_app):
+    """
+    Invia alert se l'utente ha registrato umore stressato (1 o 2) oggi.
+    Max 1 volta al giorno per utente.
+    FIX: salva lastStressAlertSent su Firebase PRIMA di inviare il messaggio,
+    così evita duplicati in caso di race condition tra esecuzioni ravvicinate.
+    """
     loop      = asyncio.get_event_loop()
     now       = datetime.now(timezone.utc)
     today_str = now.strftime("%Y-%m-%d")
@@ -759,6 +765,15 @@ async def send_stress_mood_alerts(tg_app):
         if not stressed_today:
             continue
 
+        # ✅ FIX DEDUPLICAZIONE: salva su Firebase PRIMA di inviare.
+        # Se il job gira di nuovo prima che il messaggio venga consegnato,
+        # trova già lastStressAlertSent == today_str e blocca il secondo invio.
+        new_prefs = {**prefs, "lastStressAlertSent": today_str}
+        await loop.run_in_executor(
+            None,
+            lambda u=uid, p=new_prefs: save_notification_prefs_sync(u, p)
+        )
+
         name     = user.get("displayName", "")
         language = user.get("language", "it")
 
@@ -774,12 +789,6 @@ async def send_stress_mood_alerts(tg_app):
             try:
                 await tg_app.bot.send_message(chat_id=chat_id, text=message)
                 logger.info(f"😟 Stress mood alert inviato a {chat_id}")
-                await loop.run_in_executor(
-                    None,
-                    lambda u=uid, p=prefs: save_notification_prefs_sync(
-                        u, {**p, "lastStressAlertSent": today_str}
-                    )
-                )
             except Exception as e:
                 logger.error(f"Stress alert error {chat_id}: {e}")
 
